@@ -3,6 +3,8 @@ import numpy as np
 from sklearn.datasets import make_blobs
 
 
+# 实现高斯混合模型，并且使用 E-M 算法迭代求解模型的参数
+# 参考代码 https://blog.csdn.net/weixin_41566471/article/details/106221915
 class GaussianMixtureModel:
 
     def __init__(self, K=3):
@@ -145,9 +147,9 @@ class GaussianMixtureModel:
         plt.figure(figsize=(10,5))
 
         plt.subplot(1, 2, 1)
-        plt.scatter(prediction_1[:, 0], prediction_1[:, 1], c='red')
-        plt.scatter(prediction_2[:, 0], prediction_2[:, 1], c='blue')
-        plt.scatter(prediction_3[:, 0], prediction_3[:, 1], c='green')
+        plt.scatter(prediction_1[:, 0], prediction_1[:, 1], c='pink')
+        plt.scatter(prediction_2[:, 0], prediction_2[:, 1], c='maroon')
+        plt.scatter(prediction_3[:, 0], prediction_3[:, 1], c='gold')
         plt.title('prediction')
 
         plt.subplot(1, 2, 2)
