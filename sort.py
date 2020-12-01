@@ -4,6 +4,7 @@ from numba import jit
 import numpy as np
 from sklearn.utils.linear_assignment_ import linear_assignment
 from filterpy.kalman import KalmanFilter
+import cv2
 
 
 @jit
@@ -130,14 +131,14 @@ class Tracker(object):
     def downward(self):
         if len(self.path) >= self.n_init:
             for i in range(len(self.path) - 1, len(self.path) - self.n_init + 1, -1):
-                if self.path[i][3] - self.path[i - 1][3] < 20:
+                if self.path[i][3] - self.path[i - 1][3] < 10:
                     return False
             return True
 
         return False
 
 
-def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
+def associate_detections_to_trackers(detections, trackers, iou_threshold=0.25):
     """
     Assigns detections to tracked object (both represented as bounding boxes)
     Returns 3 lists of matches, unmatched_detections and unmatched_trackers
@@ -249,6 +250,9 @@ class Sort(object):
         # 将预测为空的卡尔曼跟踪器所在行删除，最后 trks 中存放的是上一帧中被跟踪的所有物体在当前帧中预测的非空 bbox
         trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
 
+        # for trk in trks:
+        #     cv2.rectangle(frame, (trk[0], trk[1]), (trk[2], trk[3]), (0, 0, 255), 3)
+
         # 对 del 数组进行倒序遍历
         for t in reversed(to_del):
             # 从 tracker 列表中删除掉在这一帧图像中预测的 bbox 为空的 tracker
@@ -284,7 +288,7 @@ class Sort(object):
             # 同时满足以下两个条件的 tracker 才能够返回:
             # 1.在这一帧中，tracker 有与其匹配的 detection 目标
             # 2.tracker 最少连续匹配上了 min_hits 次 (除非当前为止的帧数少于 min_hits)
-            if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits):
+            if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits) and trk.downward():
                 ret.append(np.concatenate((d, [trk.id + 1])).reshape(1, -1))  # +1 as MOT benchmark requires positive
             i -= 1
             # remove dead tracker
@@ -293,6 +297,6 @@ class Sort(object):
                 self.trackers.pop(i)
 
         if len(ret) > 0:
-            return np.concatenate(ret), self.trackers
+            return np.concatenate(ret), self.trackers, trks
 
-        return np.empty((0, 5)), self.trackers
+        return np.empty((0, 5)), self.trackers, trks
