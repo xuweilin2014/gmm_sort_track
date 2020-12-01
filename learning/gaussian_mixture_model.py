@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.datasets import make_blobs
 
 
-# 实现高斯混合模型，并且使用 E-M 算法迭代求解模型的参数
+# 手动实现高斯混合模型，并且使用 E-M 算法迭代求解模型的参数
 # 参考代码 https://blog.csdn.net/weixin_41566471/article/details/106221915
 class GaussianMixtureModel:
 
