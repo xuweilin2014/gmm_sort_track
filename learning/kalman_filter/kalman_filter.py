@@ -69,7 +69,6 @@ for k in range(iterations + 1):
 
     # 计算出物体的实际状态，xk = Axk-1 + wk-1
     xk = np.matmul(A, np.transpose(x_prev)) + np.transpose(w)
-
     real.append(np.asarray(xk))
 
     # 计算出物体的测量值，zk = Hxk + vk
@@ -87,9 +86,9 @@ for k in range(iterations + 1):
     x_post_prev = xk_post
     x_prev = xk
 
+# 生成速度比较的图像
 x = np.linspace(1, 50, 50, dtype=int)
 plt.title('velocity comparison')
-# group_labels = ['real velocity', 'measurement velocity', 'prior velocity', 'post velocity']
 velocity_real = np.asarray(real)[:, 1]
 velocity_measurement = np.asarray(measurement)[:, 1]
 velocity_prior = np.asarray(prior)[:, 1]
@@ -103,8 +102,8 @@ plt.grid()
 plt.savefig("速度比较.png", dpi=900, bbox_inches='tight')
 plt.show()
 
+# 生成位置比较的曲线图
 plt.title('position comparison')
-# group_labels = ['real position', 'measurement position', 'prior position', 'post position']
 position_real = np.asarray(real)[:, 0]
 position_measurement = np.asarray(measurement)[:, 0]
 position_prior = np.asarray(prior)[:, 0]
