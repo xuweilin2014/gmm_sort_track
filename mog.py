@@ -48,39 +48,38 @@ class Detector(object):
 
             for b in bounds:
                 x, y, w, h = b
-                cv2.rectangle(frame, (x,y), (x + w, y + h), (0, 255, 0), 3)
+                # cv2.rectangle(frame, (x,y), (x + w, y + h), (0, 255, 0), 3)
                 dets.append([x, y, x + w, y + h, 1])
 
             dets = np.asarray(dets)
+            ret, tracks, trks = tracker.update(dets)
 
-            if dets.any():
-                ret, tracks, trks = tracker.update(dets)
+            boxes = []
+            indexIDs = []
 
-                boxes = []
-                indexIDs = []
+            # for trk in trks:
+            #     cv2.rectangle(frame, (int(trk[0]), int(trk[1])), (int(trk[2]), int(trk[3])), (0, 0, 255), 3)
 
-                for trk in trks:
-                    cv2.rectangle(frame, (int(trk[0]), int(trk[1])), (int(trk[2]), int(trk[3])), (0, 0, 255), 3)
+            for bbox in ret:
+                boxes.append([bbox[0], bbox[1], bbox[2], bbox[3]])
+                indexIDs.append(int(bbox[4]))
 
-                for bbox in ret:
-                    boxes.append([bbox[0], bbox[1], bbox[2], bbox[3]])
-                    indexIDs.append(int(bbox[4]))
+            if len(boxes) > 0:
+                for id, box in zip(indexIDs, boxes):
+                    (left_x, top_y) = (int(box[0]), int(box[1]))
+                    (right_x, bottom_y) = (int(box[2]), int(box[3]))
 
-                if len(boxes) > 0:
-                    i = int(0)
-                    for box in boxes:
-                        (left_x, top_y) = (int(box[0]), int(box[1]))
-                        (right_x, bottom_y) = (int(box[2]), int(box[3]))
+                    color = [int(c) for c in COLORS[id % len(COLORS)]]
+                    cv2.rectangle(frame, (left_x, top_y), (right_x, bottom_y), color, 3)
+                    cv2.putText(frame, "{}".format(id), (left_x, top_y - 5), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 3)
 
-                        color = [int(c) for c in COLORS[indexIDs[i] % len(COLORS)]]
-                        cv2.rectangle(frame, (left_x, top_y), (right_x, bottom_y), color, 3)
-                        cv2.putText(frame, "{}".format(indexIDs[i]), (left_x, top_y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 3)
-
-                for track in tracks:
+            for track in tracks:
+                if track.downward():
                     dets = track.path
                     for i in range(len(dets)):
                         if i > 0:
-                            cv2.line(frame, (self.get_center(dets[i])), (self.get_center(dets[i - 1])), (0,0,255), 3)
+                            color = [int(c) for c in COLORS[(track.id + 1) % len(COLORS)]]
+                            cv2.line(frame, (self.get_center(dets[i])), (self.get_center(dets[i - 1])), color, 3)
 
             cv2.namedWindow("result", 0)
             cv2.resizeWindow("result", 1200, 1000)
