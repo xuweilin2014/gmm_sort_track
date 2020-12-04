@@ -59,6 +59,9 @@ class KalmanFilter(object):
         for i in range(ndim):
             self._motion_mat[i, ndim + i] = self.dt
 
+        self._control_mat = np.transpose(np.array([0.5, 0.5, 0.005, 0.005, 1, 2.8, 0.001, 0.002]))
+        self.u = 1
+
         '''
         初始化测量矩阵 H 为：
         [[1., 0., 0., 0., 0., 0., 0., 0.],
@@ -143,7 +146,7 @@ class KalmanFilter(object):
         # 初始化噪声矩阵 Q，代表了我们建立模型的不确定度，一般初始化为很小的值，这里是根据 track 的高度 h 初始化的 motion_cov
         motion_cov = np.diag(np.square(np.r_[std_pos, std_vel]))
         # x_prior(:k) = F * x_post(:k-1)
-        mean = np.dot(self._motion_mat, mean)
+        mean = np.dot(self._motion_mat, mean) + self._control_mat * self.u
         # p_prior(:k) = A * p_post(:k-1) * A.T + Q
         covariance = np.linalg.multi_dot((self._motion_mat, covariance, self._motion_mat.T)) + motion_cov
 
