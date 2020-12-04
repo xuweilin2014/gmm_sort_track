@@ -2,6 +2,8 @@ import cv2
 from time import sleep
 from sort import Sort
 import numpy as np
+from detection import Detection
+import time
 
 
 class Detector(object):
@@ -13,7 +15,6 @@ class Detector(object):
 
     # noinspection PyAttributeOutsideInit
     def catch_video(self, video_index, min_area):
-
         cap = cv2.VideoCapture(video_index)  # 创建摄像头识别类
         tracker = Sort()
 
@@ -36,7 +37,6 @@ class Detector(object):
         self.mog = cv2.createBackgroundSubtractorMOG2(detectShadows=False)
 
         while cap.isOpened():
-            sleep(0.1)
 
             mask, frame = self.gaussian_bk(cap)
 
@@ -48,17 +48,18 @@ class Detector(object):
 
             for b in bounds:
                 x, y, w, h = b
-                # cv2.rectangle(frame, (x,y), (x + w, y + h), (0, 255, 0), 3)
-                dets.append([x, y, x + w, y + h, 1])
+                cv2.rectangle(frame, (x,y), (x + w, y + h), (0, 255, 0), 3)
+                dets.append(Detection(np.array([x, y, w, h]), 1))
 
             dets = np.asarray(dets)
+            tracker.predict()
             ret, tracks, trks = tracker.update(dets)
 
             boxes = []
             indexIDs = []
 
-            # for trk in trks:
-            #     cv2.rectangle(frame, (int(trk[0]), int(trk[1])), (int(trk[2]), int(trk[3])), (0, 0, 255), 3)
+            for trk in trks:
+                cv2.rectangle(frame, (int(trk[0]), int(trk[1])), (int(trk[2]), int(trk[3])), (0, 0, 255), 3)
 
             for bbox in ret:
                 boxes.append([bbox[0], bbox[1], bbox[2], bbox[3]])
@@ -75,18 +76,20 @@ class Detector(object):
 
             for track in tracks:
                 if track.downward():
-                    dets = track.path
-                    for i in range(len(dets)):
+                    bboxes = track.path
+                    for i in range(len(bboxes)):
                         if i > 0:
-                            color = [int(c) for c in COLORS[(track.id + 1) % len(COLORS)]]
-                            cv2.line(frame, (self.get_center(dets[i])), (self.get_center(dets[i - 1])), color, 3)
+                            color = [int(c) for c in COLORS[(track.track_id) % len(COLORS)]]
+                            cv2.line(frame, (self.get_center(bboxes[i])), (self.get_center(bboxes[i - 1])), color, 3)
 
             cv2.namedWindow("result", 0)
             cv2.resizeWindow("result", 1200, 1000)
             # cv2.imwrite("output/images/frame_{}.jpg".format(frame_count), frame)
             cv2.imshow("result", frame)
+
             out_frame.write(frame)
             out_mask.write(np.expand_dims(mask, 2).repeat(3, axis=2))
+
             cv2.waitKey(10)
 
         # 释放摄像头
@@ -102,7 +105,6 @@ class Detector(object):
         return None
 
     def gaussian_bk(self, cap, k_size=3):
-
         catch, frame = cap.read()  # 读取每一帧图片
 
         if not catch:
