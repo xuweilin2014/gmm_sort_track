@@ -133,3 +133,4 @@ dmypy.json
 .gmm_venv/
 # Project exclude paths
 /gmm_venv/
+!/learning/images/

@@ -1,8 +1,8 @@
 from __future__ import print_function
 import numpy as np
-from associate import associate_detections_to_trackers
-from track import Track
-import kalman_filter
+from sort.associate import associate_detections_to_trackers
+from sort.track import Track
+from sort import kalman_filter
 
 """
 SORT 跟踪算法到底在干什么？

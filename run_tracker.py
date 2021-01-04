@@ -1,9 +1,7 @@
 import cv2
-from time import sleep
-from sort import Sort
 import numpy as np
-from detection import Detection
-import time
+from sort.detection import Detection
+from sort.sort import Sort
 
 
 class Detector(object):
@@ -84,9 +82,11 @@ class Detector(object):
 
             cv2.namedWindow("result", 0)
             cv2.resizeWindow("result", 1200, 1000)
-            # cv2.imwrite("output/images/frame_{}.jpg".format(frame_count), frame)
             cv2.imshow("result", frame)
 
+            mask = np.expand_dims(mask, 2).repeat(3, axis=2)
+
+            cv2.imshow("mask", mask)
             out_frame.write(frame)
             out_mask.write(np.expand_dims(mask, 2).repeat(3, axis=2))
 
@@ -109,6 +109,7 @@ class Detector(object):
 
         if not catch:
             print('The end of the video.')
+            return
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         mask = self.mog.apply(gray).astype('uint8')
@@ -119,4 +120,4 @@ class Detector(object):
 
 if __name__ == "__main__":
     detector = Detector(name='test')
-    detector.catch_video('./input/p.mp4', min_area=500)
+    detector.catch_video('./input/p.mp4', min_area=150)

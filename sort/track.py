@@ -1,5 +1,4 @@
 import numpy as np
-import kalman_filter as kf
 
 
 # 将 bbox 由 [x1,y1,x2,y2] 形式转为 [框中心点 x, 框中心点 y, 框面积 s, 宽高比例 r].T
@@ -46,7 +45,7 @@ class Track(object):
     """
     count = 0
 
-    def __init__(self, bbox, mean, covariance, track_id, n_init=10, max_age=30):
+    def __init__(self, bbox, mean, covariance, track_id, n_init=30, max_age=30):
         """
         Initialises a tracker using initial bounding box.
         使用初始化边界框初始化跟踪器
@@ -60,8 +59,6 @@ class Track(object):
 
         self.hits = 1
         self.time_since_update = 0
-
-
 
         self.path = []
         self.path.append(bbox)
