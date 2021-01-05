@@ -1,6 +1,6 @@
 from time import time
 import cv2
-from kcf import kcf_tracker
+from src.kcf import kcf_tracker
 
 selectingObject = False
 initTracking = False
