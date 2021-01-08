@@ -16,21 +16,6 @@ def mround(x):
     x_[idx] = np.floor(x[idx])
     return x_
 
-def extract_cn_feature(img,cell_size=1):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255 - 0.5
-    cn = TableFeature(fname='cn', cell_size=cell_size, compressed_dim=31, table_name="CNnorm", use_for_color=True)
-
-    if np.all(img[:, :, 0] == img[:, :, 1]):
-        img = img[:, :, :1]
-    else:
-        # # pyECO using RGB format
-        img = img[:, :, ::-1]
-    h,w=img.shape[:2]
-    cn_feature = cn.get_features(img, np.array(np.array([h/2,w/2]), dtype=np.int16), np.array([h,w]), 1, normalization=False)[0][:, :, :, 0]
-    gray = cv2.resize(gray, (cn_feature.shape[1], cn_feature.shape[0]))[:, :, np.newaxis]
-    out = np.concatenate((gray, cn_feature), axis=2)
-    return out
-
 class Feature:
     def __init__(self):
         pass

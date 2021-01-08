@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
-from src.sort import Detection
-from src.sort import Sort
+from detection import Detection
+from sort import Sort
 
 
 class Detector(object):
@@ -39,6 +39,8 @@ class Detector(object):
             mask, frame = self.gaussian_bk(cap)
 
             frame_count += 1
+            if 622 <= frame_count <= 1150:
+                continue
 
             cnts, _ = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             bounds = [cv2.boundingRect(c) for c in cnts if cv2.contourArea(c) > min_area]
@@ -51,7 +53,7 @@ class Detector(object):
 
             dets = np.asarray(dets)
             tracker.predict()
-            ret, tracks, trks = tracker.update(dets)
+            ret, tracks, trks = tracker.update(frame, dets)
 
             boxes = []
             indexIDs = []
@@ -120,4 +122,4 @@ class Detector(object):
 
 if __name__ == "__main__":
     detector = Detector(name='test')
-    detector.catch_video('./input/p.mp4', min_area=150)
+    detector.catch_video('../../input/p.mp4', min_area=120)

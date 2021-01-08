@@ -65,7 +65,7 @@ class Track(object):
         self.n_init = n_init
         self.max_age = max_age
 
-    def update(self, kf, tlbr, bbox):
+    def update(self, kf, tlwh, tlbr, bbox):
         """
         Updates the state vector with observed bbox.
         """

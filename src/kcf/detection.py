@@ -16,3 +16,6 @@ class Detection:
         ret[:2] += ret[2:] / 2
         ret[2] /= ret[3]
         return ret
+
+    def to_tlwh(self):
+        return self.tlwh.copy()

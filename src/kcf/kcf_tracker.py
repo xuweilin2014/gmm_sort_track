@@ -1,13 +1,14 @@
 from src.kcf import fhog
-from src.kcf.table_feature import extract_cn_feature
 from utils import *
-
+import numpy as np
+import cv2
 
 # KCF tracker
 # 计算一维亚像素的峰值
 def subPixelPeak(left, center, right):
     divisor = 2 * center - right - left  # float
     return 0 if abs(divisor) < 1e-3 else 0.5 * (right - left) / divisor
+
 
 '''
 kcf1 tracker 跟踪算法主要使用了三个公式：核回归训练提速、核回归检测提速、核相关矩阵的计算提速
@@ -17,7 +18,7 @@ kcf1 tracker 跟踪算法主要使用了三个公式：核回归训练提速、�
 上一帧目标框中心的偏移量，然后移动目标框，使得新的最大响应值的位置在目标框中心。然后再调用 tracker#train 方法，根据新读入的图像，更新模板以及核线性回归参数 alpha
 '''
 class KCFTracker:
-    def __init__(self, hog=False, fixed_window=True, multiscale=False):
+    def __init__(self, hog=False, fixed_window=True, multiscale=False, peak_threshold=0.4):
         # 岭回归中的 lambda 常数，正则化
         self.lambdar = 0.0001   # regularization
         # extra area surrounding the target
@@ -25,6 +26,7 @@ class KCFTracker:
         self.padding = 2.5
         # bandwidth of gaussian target
         self.output_sigma_factor = 0.125   # bandwidth of gaussian target
+        self.peak_threshold = peak_threshold
 
         if hog:
             # HOG feature
@@ -220,8 +222,6 @@ class KCFTracker:
             self.size_patch = list(map(int, [mapp['sizeY'], mapp['sizeX'], mapp['numFeatures']]))
             hog_feature = mapp['map'].reshape((self.size_patch[0] * self.size_patch[1], self.size_patch[2])).T   # (size_patch[2], size_patch[0]*size_patch[1])
             cn_feature = extract_cn_feature(z, self.cell_size)
-            shape = cn_feature.shape
-            cn_feature.resize(shape[2], shape[0] * shape[1])
             FeaturesMap = np.concatenate((hog_feature, cn_feature), axis=0)
 
             # size_patch 为列表，保存裁剪下来的特征图的 [长，宽，通道]
@@ -293,19 +293,20 @@ class KCFTracker:
     # 获取当前帧的目标位置以及尺度，image 为当前帧的整幅图像
     # 基于当前帧更新目标位置
     def update(self, image):
+        roi = self._roi
         # 修正边界
-        if self._roi[0] + self._roi[2] <= 0:
-            self._roi[0] = -self._roi[2] + 1
-        if self._roi[1] + self._roi[3] <= 0:
-            self._roi[1] = -self._roi[2] + 1
-        if self._roi[0] >= image.shape[1] - 1:
-            self._roi[0] = image.shape[1] - 2
-        if self._roi[1] >= image.shape[0] - 1:
-            self._roi[1] = image.shape[0] - 2
+        if roi[0] + roi[2] <= 0:
+            roi[0] = -roi[2] + 1
+        if roi[1] + roi[3] <= 0:
+            roi[1] = -roi[2] + 1
+        if roi[0] >= image.shape[1] - 1:
+            roi[0] = image.shape[1] - 2
+        if roi[1] >= image.shape[0] - 1:
+            roi[1] = image.shape[0] - 2
 
         # 跟踪框、尺度框的中心
-        cx = self._roi[0] + self._roi[2] / 2.
-        cy = self._roi[1] + self._roi[3] / 2.
+        cx = roi[0] + roi[2] / 2.
+        cy = roi[1] + roi[3] / 2.
         # loc: 表示新的最大响应值偏离 roi 中心的位移
         # peak_value: 尺度不变时检测峰值结果
         loc, peak_value = self.detect(self._tmpl, self.getFeatures(image, 0, 1.0))
@@ -325,37 +326,38 @@ class KCFTracker:
                 loc = new_loc1
                 peak_value = new_peak_value1
                 self._scale /= self.scale_step
-                self._roi[2] /= self.scale_step
-                self._roi[3] /= self.scale_step
+                roi[2] /= self.scale_step
+                roi[3] /= self.scale_step
             elif self.scale_weight * new_peak_value2 > peak_value:
                 loc = new_loc2
                 peak_value = new_peak_value2
                 self._scale *= self.scale_step
-                self._roi[2] *= self.scale_step
-                self._roi[3] *= self.scale_step
+                roi[2] *= self.scale_step
+                roi[3] *= self.scale_step
 
-        # 重新计算 self._roi[0] 和 self._roi[1] 使得新的最大响应值位于目标框的中心
-        self._roi[0] = cx - self._roi[2] / 2.0 + loc[0] * self.cell_size * self._scale
-        self._roi[1] = cy - self._roi[3] / 2.0 + loc[1] * self.cell_size * self._scale
+        # 重新计算 roi[0] 和 roi[1] 使得新的最大响应值位于目标框的中心
+        roi[0] = cx - roi[2] / 2.0 + loc[0] * self.cell_size * self._scale
+        roi[1] = cy - roi[3] / 2.0 + loc[1] * self.cell_size * self._scale
 
-        if self._roi[0] >= image.shape[1] - 1:
-            self._roi[0] = image.shape[1] - 1
-        if self._roi[1] >= image.shape[0] - 1:
-            self._roi[1] = image.shape[0] - 1
-        if self._roi[0] + self._roi[2] <= 0:
-            self._roi[0] = -self._roi[2] + 2
-        if self._roi[1] + self._roi[3] <= 0:
-            self._roi[1] = -self._roi[3] + 2
+        if roi[0] >= image.shape[1] - 1:
+            roi[0] = image.shape[1] - 1
+        if roi[1] >= image.shape[0] - 1:
+            roi[1] = image.shape[0] - 1
+        if roi[0] + roi[2] <= 0:
+            roi[0] = -roi[2] + 2
+        if roi[1] + roi[3] <= 0:
+            roi[1] = -roi[3] + 2
 
-        assert(self._roi[2] > 0 and self._roi[3] > 0)
+        assert (roi[2] > 0 and roi[3] > 0)
 
+        return roi, peak_value
+
+    def retrain(self, image, roi):
+        self._roi = roi
         # 使用当前的检测框来训练样本参数
         x = self.getFeatures(image, 0, 1.0)
         self.train(x, self.interp_factor)
 
-        return self._roi, peak_value
-
 def extract_image(image, roi):
     img = image[int(roi[1]):int(roi[1] + roi[3]), int(roi[0]):int(roi[0] + roi[2])]
-    cv2.imwrite('img.jpg', img)
     return img

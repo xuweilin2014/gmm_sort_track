@@ -1,8 +1,8 @@
 from __future__ import print_function
 import numpy as np
-from src.sort import associate_detections_to_trackers
+from associate import associate_detections_to_trackers, kcf_associate
 from track import Track
-from src.sort import kalman_filter
+from src.gmm_sort import kalman_filter
 
 """
 SORT 跟踪算法到底在干什么？
@@ -50,7 +50,7 @@ class Sort(object):
     """
     :param dets: 输入的 dets 是检测结果，形式为 [x1, y1, x2, y2, score]
     """
-    def update(self, detections):
+    def update(self, frame, detections):
         """
         Params:
         dets - a numpy array of detections in the format [[x,y,w,h,score],[x,y,w,h,score],...]
@@ -95,7 +95,9 @@ class Sort(object):
         if dets.any():
             # 对传入的检测结果 dets 与上一帧跟踪物体在当前帧中预测的结果 trks 做关联，
             # 返回匹配的目标矩阵 matched, 新增目标的矩阵 unmatched_dets, 离开画面的目标矩阵 unmatched_trks
-            matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets, trks)
+            matched_a, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets, trks)
+            matched_b, unmatched_dets, unmatched_trks = kcf_associate(frame, unmatched_dets, unmatched_trks, detections, self.tracks)
+            matched = np.concatenate((matched_a, matched_b), axis=0)
 
             # update matched trackers with assigned detections
             # 对卡尔曼跟踪器做遍历
@@ -105,7 +107,7 @@ class Sort(object):
                 # 检测器的 bbox 结果，并用其来更新 tracker 中的卡尔曼滤波器
                 trk = self.tracks[track_idx]
                 detection = detections[detection_idx]
-                trk.update(self.kf, detection.to_tlbr(), detections[detection_idx].to_xyah())
+                trk.update(frame, self.kf, detection.to_tlwh(), detection.to_tlbr(), detections[detection_idx].to_xyah())
 
             for track_idx in unmatched_trks:
                 self.tracks[track_idx].mark_missed()
@@ -117,6 +119,8 @@ class Sort(object):
                 mean, covariance = self.kf.initiate(det.to_xyah())
                 # 将新增的未匹配的检测结果 dets[i, :] 传入到 Tracker，从而重新创建一个 tracker
                 trk = Track(det.to_tlbr(), mean, covariance, self.generate_id(), self.n_init, self.max_age)
+                # 初始化 tracker 中的 kcf 跟踪器
+                trk.init_kcf(frame, det.tlwh)
                 # 将刚刚创建和初始化的跟踪器 trk 传入到 trackers 中
                 self.tracks.append(trk)
 

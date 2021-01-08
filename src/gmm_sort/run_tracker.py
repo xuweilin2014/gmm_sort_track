@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
-from src.sort import Detection
-from src.sort import Sort
+from src.gmm_sort import Detection
+from src.gmm_sort import Sort
 
 
 class Detector(object):

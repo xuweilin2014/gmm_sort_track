@@ -1,4 +1,5 @@
 import numpy as np
+from kcf_tracker import KCFTracker
 
 
 # 将 bbox 由 [x1,y1,x2,y2] 形式转为 [框中心点 x, 框中心点 y, 框面积 s, 宽高比例 r].T
@@ -52,6 +53,7 @@ class Track(object):
         """
         # define constant velocity model
         # 定义匀速模型，状态变量是 8 维，观测值是 4 维，按照需要的维度构建目标
+        self.kcf = KCFTracker(True, True, True)
         self.mean = mean
         self.covariance = covariance
         self.track_id = track_id
@@ -65,10 +67,20 @@ class Track(object):
         self.n_init = n_init
         self.max_age = max_age
 
-    def update(self, kf, tlbr, bbox):
+    def init_kcf(self, frame, tlwh):
+        self.kcf.init(tlwh, frame)
+
+    def update_kcf(self, frame):
+        return self.kcf.update(frame)
+
+    def retrain_kcf(self, frame, roi):
+        self.kcf.retrain(frame, roi)
+
+    def update(self, frame, kf, tlwh, tlbr, bbox):
         """
         Updates the state vector with observed bbox.
         """
+        self.kcf.retrain(frame, tlwh)
         self.mean, self.covariance = kf.update(self.mean, self.covariance, bbox)
         self.hits += 1
         self.time_since_update = 0

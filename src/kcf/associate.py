@@ -17,10 +17,55 @@ def iou(bb_test, bb_gt):
     wh = w * h
     # IoU = (bb_test 和 bb_gt 框相交部分的面积） / （bb_test 框面积 + bb_gt 框面积 - 两者相交部分的面积）
     o = wh / ((bb_test[2] - bb_test[0]) * (bb_test[3] - bb_test[1]) + (bb_gt[2] - bb_gt[0]) * (bb_gt[3] - bb_gt[1]) - wh)
-    return (o)
+    return o
+
+def kcf_associate(frame, unmatched_dets, unmatched_trks, dets, trks):
+    unmatched_dets_final = []
+    unmatched_trks_final = []
+    peak_threshold = 0.1
+    matched = []
+
+    for trk_index in unmatched_trks:
+        distance = []
+        trk = trks[trk_index]
+        box, peak_value = trk.update_kcf(frame)
+
+        if peak_threshold > peak_value:
+            continue
+
+        cx = box[0] + box[2] / 2
+        cy = box[1] + box[3] / 2
+        for det_index in unmatched_dets:
+            det = dets[det_index]
+            det_box = det.to_tlwh()
+            det_cx = det_box[0] + det_box[2] / 2
+            det_cy = det_box[1] + det_box[3] / 2
+            dist = (cx - det_cx) ** 2 + (cy - det_cy) ** 2
+            if dist < max(box[2], box[3]) * 4:
+                distance.append([(cx - det_cx) ** 2 + (cy - det_cy) ** 2, det_index])
+
+        distance = np.array(distance)
+        if len(distance) > 0 and len(dets) > 0:
+            min_index = int(distance.min(axis=0)[1])
+            trk.retrain_kcf(frame, dets[min_index].to_tlwh())
+            matched.append([min_index, trk_index])
+
+    matched = np.array(matched)
+    for det_index in unmatched_dets:
+        if len(matched) == 0 or det_index not in matched[:, 0]:
+            unmatched_dets_final.append(det_index)
+
+    for trk_index in unmatched_trks:
+        if len(matched) == 0 or trk_index not in matched[:, 1]:
+            unmatched_trks_final.append(trk_index)
+
+    if len(matched) == 0:
+        matched = np.empty((0, 2), dtype=int)
+
+    return matched, unmatched_dets_final, unmatched_trks_final
 
 
-def associate_detections_to_trackers(detections, trackers, iou_threshold=0.15):
+def associate_detections_to_trackers(detections, trackers, iou_threshold=0.1):
     """
     Assigns detections to tracked object (both represented as bounding boxes)
     Returns 3 lists of matches, unmatched_detections and unmatched_trackers
