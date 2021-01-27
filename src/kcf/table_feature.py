@@ -2,12 +2,14 @@ import numpy as np
 import cv2
 import os
 import pickle
+from numba import jit
 
 normalize_power = 2
 normalize_size = True
 normalize_dim = True
 square_root_normalization = False
 
+@jit
 def mround(x):
     x_ = x.copy()
     idx = (x - np.floor(x)) >= 0.5
@@ -21,6 +23,7 @@ class Feature:
         pass
 
     # noinspection PyAttributeOutsideInit
+    @jit
     def init_size(self, img_sample_sz, cell_size=None):
         if cell_size is not None:
             max_cell_size = max(cell_size)
@@ -35,6 +38,7 @@ class Feature:
         return img_sample_sz
 
     # noinspection PyMethodMayBeStatic
+    @jit
     def _sample_patch(self, im, pos, sample_sz, output_sz):
         pos = np.floor(pos)
         sample_sz = np.maximum(mround(sample_sz), 1)
@@ -64,6 +68,7 @@ class Feature:
         return im_patch
 
     # noinspection PyMethodMayBeStatic
+    @jit
     def _feature_normalization(self, x):
         if normalize_power == 2:
             x = x * np.sqrt((x.shape[0]*x.shape[1]) ** normalize_size * (x.shape[2] ** normalize_dim) / (x ** 2).sum(axis=(0, 1, 2)))
@@ -94,12 +99,14 @@ class TableFeature(Feature):
         self.data_sz = None
 
     # noinspection PyMethodMayBeStatic
+    @jit
     def integralVecImage(self, img):
         w, h, c = img.shape
         intImage = np.zeros((w+1, h+1, c), dtype=img.dtype)
         intImage[1:, 1:, :] = np.cumsum(np.cumsum(img, 0), 1)
         return intImage
 
+    @jit
     def average_feature_region(self, features, region_size):
         region_area = region_size ** 2
         if features.dtype == np.float32:
@@ -112,6 +119,7 @@ class TableFeature(Feature):
         region_image = (intImage[i1, i2, :] - intImage[i1, i2-region_size,:] - intImage[i1-region_size, i2, :] + intImage[i1-region_size, i2-region_size, :])  / (region_area * maxval)
         return region_image
 
+    @jit
     def get_features(self, img, pos, sample_sz, scales,normalization=True):
         feat = []
         if not isinstance(scales, list) and not isinstance(scales, np.ndarray):

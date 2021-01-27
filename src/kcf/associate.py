@@ -19,6 +19,14 @@ def iou(bb_test, bb_gt):
     o = wh / ((bb_test[2] - bb_test[0]) * (bb_test[3] - bb_test[1]) + (bb_gt[2] - bb_gt[0]) * (bb_gt[3] - bb_gt[1]) - wh)
     return o
 
+@jit
+def comp_distance(det_box, kcf_box):
+    cx = kcf_box[0] + kcf_box[2] / 2
+    cy = kcf_box[1] + kcf_box[3] / 2
+    det_cx = det_box[0] + det_box[2] / 2
+    det_cy = det_box[1] + det_box[3] / 2
+    return (cx - det_cx) ** 2 + (cy - det_cy) ** 2
+
 def kcf_associate(frame, unmatched_dets, unmatched_trks, dets, trks):
     unmatched_dets_final = []
     unmatched_trks_final = []
@@ -33,16 +41,11 @@ def kcf_associate(frame, unmatched_dets, unmatched_trks, dets, trks):
         if peak_threshold > peak_value:
             continue
 
-        cx = box[0] + box[2] / 2
-        cy = box[1] + box[3] / 2
         for det_index in unmatched_dets:
             det = dets[det_index]
-            det_box = det.to_tlwh()
-            det_cx = det_box[0] + det_box[2] / 2
-            det_cy = det_box[1] + det_box[3] / 2
-            dist = (cx - det_cx) ** 2 + (cy - det_cy) ** 2
+            dist = comp_distance(det.to_tlwh(), box)
             if dist < max(box[2], box[3]) * 4:
-                distance.append([(cx - det_cx) ** 2 + (cy - det_cy) ** 2, det_index])
+                distance.append([dist, det_index])
 
         distance = np.array(distance)
         if len(distance) > 0 and len(dets) > 0:

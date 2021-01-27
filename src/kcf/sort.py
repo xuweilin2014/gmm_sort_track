@@ -2,7 +2,8 @@ from __future__ import print_function
 import numpy as np
 from associate import associate_detections_to_trackers, kcf_associate
 from track import Track
-from src.gmm_sort import kalman_filter
+import kalman_filter
+from numba import jit
 
 """
 SORT 跟踪算法到底在干什么？
@@ -24,6 +25,7 @@ class Sort(object):
         self.kf = kalman_filter.KalmanFilter()
         self.global_id = 1
         self.n_init = 10
+        self.saved_paths = {}
 
     # 将 (top_x, top_y, bottom_x, bottom_x, bottom_y) 转变为 (center_x, center_y, aspect ratio, h)
     # aspect ratio = width / height
@@ -37,6 +39,17 @@ class Sort(object):
         ret[3] = h
 
         return ret
+
+    @jit
+    def save_path(self):
+        for track in self.tracks:
+            if track.is_deleted() and track.downward():
+                path = np.array(track.path)
+                height, width = path.shape
+                path_center = np.empty((height, 2))
+                path_center[:, 0] = (path[:, 0] + path[:, 2]) / 2
+                path_center[:, 1] = (path[:, 1] + path[:, 3]) / 2
+                self.saved_paths[track.track_id] = path_center
 
     def generate_id(self):
         copy = self.global_id
@@ -124,6 +137,7 @@ class Sort(object):
                 # 将刚刚创建和初始化的跟踪器 trk 传入到 trackers 中
                 self.tracks.append(trk)
 
+        self.save_path()
         self.tracks = [t for t in self.tracks if not t.is_deleted()]
 
         i = len(self.tracks)

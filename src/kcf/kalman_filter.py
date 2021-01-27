@@ -1,6 +1,7 @@
 # vim: expandtab:ts=4:sw=4
 import numpy as np
 import scipy.linalg
+from numba import jit
 
 
 """
@@ -78,6 +79,7 @@ class KalmanFilter(object):
         self._std_weight_position = 1. / 20
         self._std_weight_velocity = 1. / 160
 
+    @jit
     # 对于未匹配到的目标新建一个 track，一般这样的检测目标都是新出现的物体
     def initiate(self, measurement):
         """
@@ -115,6 +117,7 @@ class KalmanFilter(object):
         covariance = np.diag(np.square(std))
         return mean, covariance
 
+    @jit
     def predict(self, mean, covariance):
         """
         Run Kalman filter prediction step.
@@ -155,6 +158,7 @@ class KalmanFilter(object):
         # 在当前帧的位置 mean 与 covariance，然后根据预测的均值和方差进行 track 和 detection 的匹配
         return mean, covariance
 
+    @jit
     def project(self, mean, covariance):
         """
         Project state distribution to measurement space.
@@ -183,6 +187,7 @@ class KalmanFilter(object):
         # H * p_prior(:k) * H.T + R
         return mean, covariance + innovation_cov
 
+    @jit
     def update(self, mean, covariance, measurement):
         """
         Run Kalman filter correction step.
