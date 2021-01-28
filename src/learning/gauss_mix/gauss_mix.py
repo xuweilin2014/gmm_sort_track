@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import multiprocessing as mp
+from numba import jit
 
 # alpha 就是论文中的更新速率 learning rate，alpha = 1 / defaultHistory2
 # defaultHistory2 表示训练得到背景模型所用到的集合大小，默认为 500，并且如果不手动设置 learning rate 的话，这个变量 defaultHistory2 就被用于计算当前的
@@ -27,6 +28,8 @@ default_ct = 0.05
 
 CV_CN_MAX = 512
 
+FLT_EPSILON = 1.19209e-07
+
 class GuassInvoker():
     def __init__(self, image, mask, gmm_model, mean_model, gauss_modes, nmixtures, lr, Tb, TB, Tg, var_init, var_min, var_max,
                  prune, nchannels):
@@ -50,7 +53,6 @@ class GuassInvoker():
         lr = self.lr
         gmm_model = self.gmm_model
         mean_model = self.mean_model
-        mask = self.mask[row]
         data = self.image[row]
         cols = data.shape[0]
         d_data = []
@@ -60,6 +62,9 @@ class GuassInvoker():
             fits = False
             modes_used = self.gauss_modes[row][col]
             total_weight = 0.
+
+            gmm_per_pixel = gmm_model[row][col]
+            mean_per_pixel = mean_model[row][col]
 
             for mode in range(modes_used):
                 gmm = gmm_model[row][col][mode]
@@ -77,8 +82,61 @@ class GuassInvoker():
                         backgroud = True
 
                     if dist2 < self.Tg * var:
+                        fits = True
+                        weight += lr
+                        k = lr / weight
+                        mean -= k * d_data
+                        var += k * (dist2 - var)
+
+                        var = max(var, self.var_min)
+                        var = min(var, self.var_max)
+                        gmm[1] = var
+
+                        for i in range(mode, 0, -1):
+                            if weight < gmm_per_pixel[i - 1][0]:
+                                break
+                            swap_count += 1
+                            gmm_per_pixel[i - 1], gmm_per_pixel[i] = gmm_per_pixel[i], gmm_per_pixel[i - 1]
+                            mean_per_pixel[i - 1], mean_per_pixel[i] = mean_per_pixel[i], mean_per_pixel[i - 1]
+
+                if weight < -self.prune:
+                    weight = 0.
+                    modes_used -= 1
+
+                gmm_per_pixel[mode - swap_count][0] = weight
+                total_weight += weight
 
 
+            inv_factor = 0.
+            if abs(total_weight) > FLT_EPSILON:
+                inv_factor = 1.0 / total_weight
+
+            gmm_per_pixel[:, 0] *= inv_factor
+
+            if not fits and lr > 0:
+                if modes_used == self.nmixtures:
+                    mode = self.nmixtures - 1
+                else:
+                    mode = modes_used
+                    modes_used += 1
+
+                if modes_used == 1:
+                    gmm_per_pixel[mode][0] = 1.0
+                else:
+                    gmm_per_pixel[mode][0] = lr
+                    gmm_per_pixel[:, 0] *= (1 - lr)
+
+                mean_per_pixel[mode] = data[col]
+                gmm_per_pixel[mode][1] = self.var_init
+
+                for i in range(modes_used - 1, 0, -1):
+                    if lr < gmm_per_pixel[i - 1][0]:
+                        break
+                    gmm_per_pixel[i - 1], gmm_per_pixel[i] = gmm_per_pixel[i], gmm_per_pixel[i - 1]
+                    mean_per_pixel[i - 1], mean_per_pixel[i] = mean_per_pixel[i], mean_per_pixel[i - 1]
+
+            self.gauss_modes[row][col] = modes_used
+            self.mask[row][col] = 0 if backgroud else 255
 
 
 # noinspection PyAttributeOutsideInit
@@ -96,7 +154,7 @@ class GuassMixBackgroundSubtractor():
         self.ct = default_ct
         self.background_ratio = default_background_ratio
 
-    def apply(self, image, lr):
+    def apply(self, image, lr=-1):
         if self.frame_count == 0 or lr >= 1:
             self.initialize(image)
 
@@ -107,21 +165,25 @@ class GuassMixBackgroundSubtractor():
         # 2.输入 lr 为 0，那么 lr 就按照 0 来计算，也就是说背景模型停止更新
         # 3.输入 lr 在 0 ~ 1 之间，那么背景模型更新速度为 lr，lr 越大更新越快，算法内部表现为当前帧参与背景更新的权重越大
         self.lr = lr if lr >= 0 and self.frame_count > 1 else 1 / min(2 * self.frame_count, self.history)
+        print(self.lr)
         pool = mp.Pool(int(mp.cpu_count()))
-        self.mask = np.zeros(image.size, dtype=int)
-        pool.map_async(self.parallel, [i for i in range(image.shape[1])])
-        pool.join()
-        pool.close()
+        self.mask = np.zeros(image.shape[:2], dtype=int)
+        # 并行
+        # pool.map_async(self.parallel, [i for i in range(self.image.shape[0])])
+        # 串行
+        for i in range(self.image.shape[0]):
+            self.parallel(i)
+        return self.mask
 
     def parallel(self, row):
         invoker = GuassInvoker(self.image, self.mask, self.gmm_model, self.mean_model, self.gauss_modes, self.nmixtures, self.lr,
                                self.var_threshold, self.background_ratio, self.var_threshold_gen, self.var_init,
-                               self.var_min, self.var_max, float(-self.lr * self.ct))
+                               self.var_min, self.var_max, float(-self.lr * self.ct), self.nchannels)
         invoker.calculate(row)
 
     def initialize(self, image):
         # bgmodelUsedModes 这个矩阵用来存储每一个像素点使用的高斯模型的个数，初始的时候都为 0
-        self.gauss_modes = np.zeros(image.shape, dtype=np.int)
+        self.gauss_modes = np.zeros(image.shape[:2], dtype=np.int)
         height, width = image.shape[:2]
         if len(image.shape) == 2:
             self.nchannels = 1
@@ -137,4 +199,23 @@ class GuassMixBackgroundSubtractor():
 
 if __name__ == '__main__':
     img = cv2.imread('blank.png')
-    print(img.shape)
+    cap = cv2.VideoCapture("p.mp4")
+
+    if not cap.isOpened():
+        # 如果没有检测到摄像头，报错
+        raise Exception('Check if the camera is on.')
+
+    mog = GuassMixBackgroundSubtractor()
+    frame_count = 0
+    while cap.isOpened():
+        catch, frame = cap.read()
+        frame_count += 1
+        if not catch:
+            print('The end of the video.')
+        else:
+            # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            mask = mog.apply(frame).astype('uint8')
+            mask = cv2.medianBlur(mask, 3)
+            cv2.imwrite('./mask' + str(frame_count) + '.jpg', mask)
+            print('writing mask' + str(frame_count) + '.jpg...')
+
