@@ -31,8 +31,7 @@ CV_CN_MAX = 512
 FLT_EPSILON = 1.19209e-07
 
 class GuassInvoker():
-    def __init__(self, image, mask, gmm_model, mean_model, gauss_modes, nmixtures, lr, Tb, TB, Tg, var_init, var_min, var_max,
-                 prune, nchannels):
+    def __init__(self, image, mask, gmm_model, mean_model, gauss_modes, nmixtures, lr, Tb, TB, Tg, var_init, var_min, var_max, prune, nchannels):
         self.image = image
         self.mask = mask
         self.gmm_model = gmm_model
@@ -138,8 +137,8 @@ class GuassInvoker():
             self.gauss_modes[row][col] = modes_used
             self.mask[row][col] = 0 if backgroud else 255
 
+        return row, self.mask[row], self.gmm_model[row], self.mean_model[row], self.gauss_modes[row]
 
-# noinspection PyAttributeOutsideInit
 # noinspection PyAttributeOutsideInit
 class GuassMixBackgroundSubtractor():
     def __init__(self):
@@ -169,17 +168,22 @@ class GuassMixBackgroundSubtractor():
         pool = mp.Pool(int(mp.cpu_count()))
         self.mask = np.zeros(image.shape[:2], dtype=int)
         # 并行
-        # pool.map_async(self.parallel, [i for i in range(self.image.shape[0])])
-        # 串行
-        for i in range(self.image.shape[0]):
-            self.parallel(i)
+        result = pool.map_async(self.parallel, [i for i in range(self.image.shape[0])]).get()
+        pool.close()
+        pool.join()
+
+        for row, mask_row, gmm_model_row, mean_model_row, gauss_modes_row in result:
+            self.mask[row] = mask_row
+            self.gauss_modes[row] = gauss_modes_row
+            self.mean_model[row] = mean_model_row
+            self.gmm_model[row] = gmm_model_row
         return self.mask
 
     def parallel(self, row):
         invoker = GuassInvoker(self.image, self.mask, self.gmm_model, self.mean_model, self.gauss_modes, self.nmixtures, self.lr,
                                self.var_threshold, self.background_ratio, self.var_threshold_gen, self.var_init,
                                self.var_min, self.var_max, float(-self.lr * self.ct), self.nchannels)
-        invoker.calculate(row)
+        return invoker.calculate(row)
 
     def initialize(self, image):
         # bgmodelUsedModes 这个矩阵用来存储每一个像素点使用的高斯模型的个数，初始的时候都为 0
@@ -199,7 +203,7 @@ class GuassMixBackgroundSubtractor():
 
 if __name__ == '__main__':
     img = cv2.imread('blank.png')
-    cap = cv2.VideoCapture("p.mp4")
+    cap = cv2.VideoCapture("/home/xwl/PycharmProjects/gmm-sort-track/input/mot.avi")
 
     if not cap.isOpened():
         # 如果没有检测到摄像头，报错
@@ -213,8 +217,8 @@ if __name__ == '__main__':
         if not catch:
             print('The end of the video.')
         else:
-            # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            mask = mog.apply(frame).astype('uint8')
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            mask = mog.apply(gray).astype('uint8')
             mask = cv2.medianBlur(mask, 3)
             cv2.imwrite('./mask' + str(frame_count) + '.jpg', mask)
             print('writing mask' + str(frame_count) + '.jpg...')
