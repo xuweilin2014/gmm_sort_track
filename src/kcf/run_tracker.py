@@ -3,6 +3,7 @@ import numpy as np
 from detection import Detection
 from sort import Sort
 from numba import jit
+from learning.corner_detection.shi_tomasi import process
 
 COLORS = np.random.randint(0, 255, size=(200, 3), dtype="uint8")
 
@@ -114,8 +115,8 @@ class Detector(object):
             mask = np.expand_dims(mask, 2).repeat(3, axis=2)
 
             cv2.imshow("mask", mask)
-            out_frame.write(frame)
-            out_mask.write(np.expand_dims(mask, 2).repeat(3, axis=2))
+            # out_frame.write(frame)
+            # out_mask.write(np.expand_dims(mask, 2).repeat(3, axis=2))
             cv2.waitKey(10)
 
         # 释放摄像头
@@ -139,12 +140,20 @@ class Detector(object):
             return
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray_copy = gray.copy()
         mask = self.mog.apply(gray).astype('uint8')
         mask = cv2.medianBlur(mask, k_size)
+
+        points = process(gray_copy)
+        for x, y in points:
+            cv2.circle(gray_copy, (int(x), y), 5, 255, -1)
+        gray_copy[gray_copy != 255] = 0
+
+        mask = cv2.bitwise_or(mask, gray_copy)
 
         return mask, frame
 
 
 if __name__ == "__main__":
     detector = Detector(name='test')
-    detector.catch_video('../../input/p.mp4', min_area=120)
+    detector.catch_video('../../input/p.mp4', min_area=130)
