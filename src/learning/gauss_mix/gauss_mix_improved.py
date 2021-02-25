@@ -4,18 +4,17 @@ import cv2
 import numpy as np
 
 """
-下面的代码实现了自适应的高斯混合算法，也就是图像中每一个像素点的高斯模型个数都不相同，在更新的过程中，会对像素点的高斯模型个数进行动态删减。
-在实现中加入了并行化，也就是一张图像的不同行的像素都由不同的进程来分别进行处理，加快运行速度
-代码的实现参考以下论文：
-adaptive Gaussian mixture model for real-time tracking
-Improved Adaptive Gaussian Mixture Model for Background Subtraction
-还有以下博客：
-https://blog.csdn.net/lwx309025167/article/details/78538714
-https://blog.csdn.net/lwx309025167/article/details/78554082
-https://blog.csdn.net/abc20002929/article/details/43247425?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.control&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.control
-最后还参考了 opencv 中混合高斯建模的源代码，也就是 bgfg_gaussmix2.cpp
-"""
+改进的高斯混合背景建模算法，相比于之前基于 Z.Zivkovic 的算法，对于权重 weight，均值 mean 以及方差 variance 都有一个不同的更新速率，并且
+这些更新速率还会随着输入的样本不断地进行调整。另外，在 Lee 的论文中，引入了历史匹配数目到模型学习率的计算中，并且在 Lee 的基础上又进行了🕐
+一些改进。另外，在 Stauffer 的论文中，在多个高斯模型中，选择第一个和当前像素点匹配到的模型作为符合条件的高斯模型，而在这里则是选择最接近的
+作为符合条件的高斯模型，然后对其 weight, mean 和 variance 进行更新。
 
+本算法的实现参考以下论文：
+adaptive gaussian mixture learning for moving object detection Long Zhao
+Dynamic Control of Adaptive Mixture-of-Gaussians Background Model Shimada
+Effective Gaussian Mixture Learning for Video Background Subtraction Dar-Shyang Lee
+基于改进混合高斯模型的运动目标检测算法 刘昊
+"""
 
 # alpha 就是论文中的更新速率 learning rate，alpha = 1 / default_history
 # default_history 表示训练得到背景模型所用到的集合大小，默认为 500，并且如果不手动设置 learning rate 的话，这个变量 default_history 就被用于计算当前的
@@ -46,7 +45,7 @@ FLT_EPSILON = 1.19209e-07
 
 
 class GuassInvoker():
-    def __init__(self, image, mask, gmm_model, mean_model, gauss_modes, nmixtures, lr, Tb, TB, Tg, var_init, var_min, var_max, prune, nchannels):
+    def __init__(self, image, mask, gmm_model, mean_model, gauss_modes, nmixtures, lr, Tb, TB, Tg, var_init, var_min, var_max, prune, ct, nchannels):
         self.image = image
         self.mask = mask
         self.gmm_model = gmm_model
@@ -61,6 +60,7 @@ class GuassInvoker():
         self.var_min = var_min
         self.var_max = var_max
         self.prune = prune
+        self.ct = ct
         self.nchannels = nchannels
 
     # 针对原图像中的某一行进行处理，row 是图像中某一行的下标
@@ -84,43 +84,77 @@ class GuassInvoker():
             gmm_per_pixel = gmm_model[row][col]
             # 当前像素点使用的所有高斯模型的均值
             mean_per_pixel = mean_model[row][col]
-            # 遍历每一个像素点的所有高斯模型
-            for mode in range(modes_used):
-                # 当前像素点的第 mode 个高斯模型，是一个长度为 2 的向量，[weight, variance]
-                gmm = gmm_model[row][col][mode]
-                # 当前像素点的第 mode 个高斯模型的均值，长度为 nchannels，也就是图像中每一个像素的分量
-                mean = mean_model[row][col][mode]
-                # 计算当前高斯分布的新权重，计算的公式如下：
-                # weight = (1 - lr) * weight - lr * ct + lr * o
-                # 其中 o 为 1 当且仅当这个像素点属于第 mode 个高斯分布，否则 o 为 0，因此 lr * o 必须在后面判断是否属于当前这个高斯分布之后，再进行计算
-                weight = (1 - lr) * gmm[0] + self.prune
-                swap_count = 0
 
-                # 只有匹配到的高斯模型，其方差和均值才会进行更新
-                if not fits:
+            costs = []
+            flag = False
+
+            for mode in range(modes_used):
+                # 一个 gmm 结构体的结构为: [weight, variance, c]，所以只有 c 值大于 0，才会进行计算 abs(x - mean) / variance
+                # c 值表示和对应高斯模型匹配的像素点的个数
+                if gmm_per_pixel[mode][2] > 0:
+                    _cost = np.sum((np.array(data[col]) - np.array(mean_per_pixel[mode])) ** 2)
+                    _cost = np.sqrt(_cost / float(gmm_per_pixel[mode][1]))
+                    # 将 [mode, abs(x - mean) / variance] 的值保存到 costs 中，其中 mode 是高斯模型的索引
+                    costs.append(np.array([mode, _cost]))
+                    flag = True
+
+            min_cost = 4.0 * 4.0
+
+            if flag:
+                _, min_cost_index = np.argmin(np.array(costs), axis=0)
+                min_index, min_cost = costs[min_cost_index]
+
+            # 只有当前 abs(x - mean) / variance < Tg 时，才会认为像素点的值符合当前高斯模型
+            if flag and min_cost < self.Tg:
+
+                fits = True
+                # 计算当前像素点所有高斯模型中 c 值之和，c 值也就是每一个高斯模型匹配上的像素点的个数，加一是因为现在有匹配上了一个像素点
+                sum_c = np.sum(gmm_per_pixel[:, 2]) + 1
+                # 计算权重 weight 的更新速率值，在之前的算法中，权重 weight，方差 variance 以及均值 mean 的更新速率全部为一个相同的固定值，
+                # 而改进的算法中，weight, variance, mean 都是由不同速率进行更新，加快收敛速度
+                lr_w = max(1.0 / sum_c, self.lr)
+
+                # 遍历每一个高斯模型
+                for mode in range(modes_used):
+                    # gmm 高斯模型是一个 3 维向量，组成为 [weight, variance, c]
+                    gmm = gmm_per_pixel[mode]
+                    # 当前高斯模型匹配上的像素点的个数
+                    c_mode = gmm[2]
+                    # 对所有高斯模型的 weight 权重值进行更新，更新的公式为：weight = (1 - lr_w) * weight - lr_w * ct + lr_w * q
+                    # 其中 q 只有对于当前最符合的高斯模型，值才为 1，其余的都为 0
+                    weight = (1 - lr_w) * gmm[0] - lr_w * self.ct
+                    mean = mean_per_pixel[mode]
+
                     var = gmm[1]
-                    # 马氏距离
-                    d_data = mean - data[col]
+                    d_data = data[col] - mean
                     dist2 = np.sum(d_data ** 2)
+
                     # 使用马氏距离来判断当前像素点是属于前景还是背景
                     if total_weight < self.TB and dist2 < self.Tb * var:
                         background = True
 
-                    # 判断当前像素点是否属于当前这个高斯模型
-                    if dist2 < self.Tg * var:
-                        fits = True
+                    swap_count = 0
+                    # 如果当前高斯模型时最符合的
+                    if mode == min_index:
 
-                        # 下面会对模型中的方差 variance、均值 mean 以及权重 weight 进行更新，更新的公式就是完全按照上面第二篇论文中的公式
-                        # 当前像素点属于这个高斯模型，因此前面提到过的 o 值为 1，因此 weight 要加上 lr * o = lr
-                        weight += lr
-                        k = lr / weight
-                        # 更新当前高斯模型的均值
-                        mean -= k * d_data
+                        gmm[2] += 1
+                        # 当前高斯模型是最符合的，因此 q = 1，因此 weight 需要加上 lr_w * q = lr_w
+                        weight += lr_w
+                        # lr_mean 时均值 mean 的更新速率, lr_var 是方差 variance 的更新速率
+                        lr_mean = max(1.0 / c_mode, self.lr)
+                        lr_var = self.lr
 
-                        # 更新当前高斯模型的方差
-                        var += k * (dist2 - var)
+                        if c_mode > 1:
+                            lr_var = max(1.0 / (c_mode - 1), self.lr)
+
+                        # 分别使用 lr_mean 和 lr_var 更新 mean 和 variance
+                        mean = mean + lr_mean * d_data
+                        mean_per_pixel[mode] = mean
+                        var = var + lr_var * (dist2 - var)
+
                         var = max(var, self.var_min)
                         var = min(var, self.var_max)
+
                         gmm[1] = var
 
                         for i in range(mode, 0, -1):
@@ -130,15 +164,14 @@ class GuassInvoker():
                             gmm_per_pixel[i - 1], gmm_per_pixel[i] = gmm_per_pixel[i], gmm_per_pixel[i - 1]
                             mean_per_pixel[i - 1], mean_per_pixel[i] = mean_per_pixel[i], mean_per_pixel[i - 1]
 
-                # 保证下一次模型的权重非负，prune = lr * ct，也就是 weight 要大于常量值 prune，否则当前高斯模型的 weight 可能就会出现小于 0 的情况。
-                # 如果 weight 小于常量值，那么必须将当前像素点的 nmodes 减一，也就是舍弃掉当前高斯模型，实现论文里面所说的模型个数自适应变化
-                if weight < -self.prune:
-                    weight = 0.
-                    modes_used -= 1
+                    # 保证下一次模型的权重非负，lr_w * ct，也就是 weight 要大于 lr_w * ct，否则当前高斯模型的 weight 可能就会出现小于 0 的情况。
+                    # 如果 weight 小于常量值，那么必须将当前像素点的 nmodes 减一，也就是舍弃掉当前高斯模型，实现论文里面所说的模型个数自适应变化
+                    if weight < self.ct * lr_w:
+                        weight = 0
+                        modes_used -= 1
 
-                # 更新权重
-                gmm_per_pixel[mode - swap_count][0] = weight
-                total_weight += weight
+                    gmm_per_pixel[mode - swap_count][0] = weight
+                    total_weight += weight
 
             if not fits and lr > 0:
                 # 如果模型数已经达到最大 nmixtures 时，替换掉权值最小的那个高斯模型; 否则，新增一个高斯模型
@@ -156,13 +189,15 @@ class GuassInvoker():
                     # 当前像素点有 nmixtures 个高斯模型，并且这些高斯模型是按照权重大小降序排列的
                     gmm_per_pixel[mode][0] = lr
 
-                    for i in range(modes_used - 1):
+                    for i in range(mode):
                         gmm_per_pixel[i][0] *= (1 - lr)
 
                 # 初始化新的高斯模型的均值 mean，使用的就是原始图像中的像素点的值来进行初始化
                 mean_per_pixel[mode] = data[col]
                 # 初始化新增的混合高斯模型 gmm 的方差 variance
                 gmm_per_pixel[mode][1] = self.var_init
+                # 初始化新增高斯模型的 c 值为 1
+                gmm_per_pixel[mode][2] = 1
 
                 # 对所有的高斯模型按照权重进行降序排序
                 for i in range(modes_used - 1, 0, -1):
@@ -210,25 +245,27 @@ class GuassMixBackgroundSubtractor():
         # 2.输入 lr 为 0，那么 lr 就按照 0 来计算，也就是说背景模型停止更新
         # 3.输入 lr 在 0 ~ 1 之间，那么背景模型更新速度为 lr，lr 越大更新越快，算法内部表现为当前帧参与背景更新的权重越大
         self.lr = lr if lr >= 0 and self.frame_count > 1 else 1 / min(2 * self.frame_count, self.history)
-        print(self.lr)
+
         pool = mp.Pool(int(mp.cpu_count()))
         self.mask = np.zeros(image.shape[:2], dtype=int)
         # 对原图像中的每一行进行并行计算
         result = pool.map_async(self.parallel, [i for i in range(self.image.shape[0])]).get()
         pool.close()
         pool.join()
+
         # 计算完成之后再进行组合，得到最后的结果
         for row, mask_row, gmm_model_row, mean_model_row, gauss_modes_row in result:
             self.mask[row] = mask_row
             self.gauss_modes[row] = gauss_modes_row
             self.mean_model[row] = mean_model_row
             self.gmm_model[row] = gmm_model_row
+
         return self.mask
 
     def parallel(self, row):
         invoker = GuassInvoker(self.image, self.mask, self.gmm_model, self.mean_model, self.gauss_modes, self.nmixtures, self.lr,
                                self.var_threshold, self.background_ratio, self.var_threshold_gen, self.var_init,
-                               self.var_min, self.var_max, float(-self.lr * self.ct), self.nchannels)
+                               self.var_min, self.var_max, float(-self.lr * self.ct), self.ct, self.nchannels)
         return invoker.calculate(row)
 
     def initialize(self, image):
@@ -241,11 +278,11 @@ class GuassMixBackgroundSubtractor():
             self.nchannels = image.shape[2]
 
         # 高斯混合背景模型分为两部分：
-        # 第一部分：height * width * nmixtures (=5) * 2 * sizeof(float)，2 表示包含 weight 和 variance 两个 float 变量，也就是 gmm_model
-        # 第二部分：height * width * nmixtures (=5) * nchannels * sizeof(float)。nchannels 一般为 3，表示 B, G, R 三个变量，其实也就是 mean 每个像素通道均对应一个均值，
+        # 第一部分：height * width * nmixtures (=5) * 3 * sizeof(float)，3 表示包含 weight, variance 以及 c 三个 float 变量，也就是 gmm_model，其中 c 表示和这个高斯模型匹配的个数
+        # 第二部分：height * width * nmixtures (=5) * nchannels * sizeof(float)，nchannels 一般为 3，表示 B, G, R 三个变量，其实也就是 mean 每个像素通道均对应一个均值，
         #          刚好有 nchannels 个单位的 float 大小，也就是 mean_model
         # nmixtures = 5 表示高斯模型的数量最多为 5 个
-        self.gmm_model = np.zeros((height, width, self.nmixtures, 2), dtype=np.float)
+        self.gmm_model = np.zeros((height, width, self.nmixtures, 3), dtype=np.float)
         self.mean_model = np.zeros((height, width, self.nmixtures, self.nchannels), dtype=np.float)
 
 
