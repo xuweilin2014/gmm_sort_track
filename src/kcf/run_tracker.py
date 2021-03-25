@@ -109,7 +109,7 @@ class Detector(object):
                             cv2.line(frame, (self.get_center(bboxes[i])), (self.get_center(bboxes[i - 1])), color, 3)
 
             cv2.namedWindow("result", 0)
-            cv2.resizeWindow("result", 1200, 1000)
+            cv2.resizeWindow("result", 600, 1000)
             cv2.imshow("result", frame)
 
             mask = np.expand_dims(mask, 2).repeat(3, axis=2)
@@ -140,16 +140,8 @@ class Detector(object):
             return
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray_copy = gray.copy()
         mask = self.mog.apply(gray).astype('uint8')
         mask = cv2.medianBlur(mask, k_size)
-
-        points = process(gray_copy)
-        for x, y in points:
-            cv2.circle(gray_copy, (int(x), y), 5, 255, -1)
-        gray_copy[gray_copy != 255] = 0
-
-        mask = cv2.bitwise_or(mask, gray_copy)
 
         return mask, frame
 
