@@ -19,7 +19,6 @@ def iou(bb_test, bb_gt):
     o = wh / ((bb_test[2] - bb_test[0]) * (bb_test[3] - bb_test[1]) + (bb_gt[2] - bb_gt[0]) * (bb_gt[3] - bb_gt[1]) - wh)
     return o
 
-@jit
 def comp_distance(det_box, kcf_box):
     cx = kcf_box[0] + kcf_box[2] / 2
     cy = kcf_box[1] + kcf_box[3] / 2

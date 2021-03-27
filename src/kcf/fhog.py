@@ -206,8 +206,8 @@ def getFeatureMaps(image, k, mapp):
 
     mapp['sizeX'] = sizeX
     mapp['sizeY'] = sizeY
-    mapp['numFeatures'] = p
-    mapp['map'] = np.zeros((mapp['sizeX'] * mapp['sizeY'] * mapp['numFeatures']), np.float32)
+    mapp['hogFeatures'] = p
+    mapp['map'] = np.zeros((mapp['sizeX'] * mapp['sizeY'] * mapp['hogFeatures']), np.float32)
 
     # 进行卷积操作，分别得到 dx, dy 方向的梯度幅值
     dx = cv2.filter2D(np.float32(image), -1, kernel)
@@ -267,7 +267,7 @@ def normalizeAndTruncate(mapp, alfa):
     # mapp['map'] 是一个 shape 为 [sizeX, sizeY, xp = 27] 大小的矩阵，而 partOfNorm 是一个 shape 为 [sizeX, sizeY, p = 9] 大小的矩阵
     # 并且 partOfNorm 中的值就是上面所说的 cell 方向梯度直方图中前 9 个方向梯度的平方值，不过这里是对应的一个 cell，具体的组合运算还是得等到
     # func3 中去进行
-    idx = np.arange(0, sizeX * sizeY * mapp['numFeatures'], mapp['numFeatures']).reshape((sizeX * sizeY, 1)) + np.arange(p)
+    idx = np.arange(0, sizeX * sizeY * mapp['hogFeatures'], mapp['hogFeatures']).reshape((sizeX * sizeY, 1)) + np.arange(p)
     partOfNorm = np.sum(mapp['map'][idx] ** 2, axis=1)
 
     # 排除掉边界的 cell
@@ -277,7 +277,7 @@ def normalizeAndTruncate(mapp, alfa):
     # 进行截断操作，也就是把 newData 中大于 alfa 的值设置为 alfa
     newData[newData > alfa] = alfa
 
-    mapp['numFeatures'] = pp
+    mapp['hogFeatures'] = pp
     mapp['sizeX'] = sizeX
     mapp['sizeY'] = sizeY
     mapp['map'] = newData
@@ -293,7 +293,7 @@ def PCAFeatureMaps(mapp):
     sizeX = mapp['sizeX']
     sizeY = mapp['sizeY']
 
-    p = mapp['numFeatures']
+    p = mapp['hogFeatures']
     pp = NUM_SECTOR * 3 + 4
     yp = 4
     xp = NUM_SECTOR
@@ -305,7 +305,7 @@ def PCAFeatureMaps(mapp):
 
     newData = func4(mapp['map'], p, sizeX, sizeY, pp, yp, xp, nx, ny)
 
-    mapp['numFeatures'] = pp
+    mapp['hogFeatures'] = pp
     mapp['map'] = newData
 
     return mapp

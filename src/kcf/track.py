@@ -46,14 +46,14 @@ class Track(object):
     """
     count = 0
 
-    def __init__(self, bbox, mean, covariance, track_id, n_init=30, max_age=30):
+    def __init__(self, frame_count, bbox, mean, covariance, track_id, n_init=30, max_age=30, cn=True, hog=True, fixed_window=True, multi_scale=True, peak_threshold=0.4):
         """
         Initialises a tracker using initial bounding box.
         使用初始化边界框初始化跟踪器
         """
         # define constant velocity model
         # 定义匀速模型，状态变量是 8 维，观测值是 4 维，按照需要的维度构建目标
-        self.kcf = KCFTracker(True, True, True)
+        self.kcf = KCFTracker(cn, hog, fixed_window, multi_scale, peak_threshold)
         self.mean = mean
         self.covariance = covariance
         self.track_id = track_id
@@ -63,9 +63,12 @@ class Track(object):
         self.time_since_update = 0
 
         self.path = []
-        self.path.append(bbox)
+        self.path.append([frame_count, bbox[0], bbox[1], bbox[2], bbox[3]])
         self.n_init = n_init
         self.max_age = max_age
+
+        # 在计算 mot 指标的时候使用
+        self.print_path = False
 
     def init_kcf(self, frame, tlwh):
         self.kcf.init(tlwh, frame)
@@ -76,7 +79,7 @@ class Track(object):
     def retrain_kcf(self, frame, roi):
         self.kcf.retrain(frame, roi)
 
-    def update(self, frame, kf, tlwh, tlbr, bbox):
+    def update(self, frame, frame_count, kf, tlwh, tlbr, bbox):
         """
         Updates the state vector with observed bbox.
         """
@@ -84,7 +87,7 @@ class Track(object):
         self.mean, self.covariance = kf.update(self.mean, self.covariance, bbox)
         self.hits += 1
         self.time_since_update = 0
-        self.path.append(tlbr)
+        self.path.append([frame_count, tlbr[0], tlbr[1], tlbr[2], tlbr[3]])
         if self.state == TrackState.Tentative and self.hits >= self.n_init:
             self.state = TrackState.Confirmed
 
@@ -122,7 +125,7 @@ class Track(object):
     def downward(self):
         if len(self.path) >= self.n_init:
             for i in range(len(self.path) - 1, len(self.path) - self.n_init + 1, -1):
-                if self.path[i][3] - self.path[i - 1][3] < 10:
+                if self.path[i][4] - self.path[i - 1][4] < 10:
                     return False
             return True
 

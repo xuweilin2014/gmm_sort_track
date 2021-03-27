@@ -14,7 +14,7 @@ SORT 跟踪算法到底在干什么？
 
 
 class Sort(object):
-    def __init__(self, max_age=30, min_hits=10, n_init = 10):
+    def __init__(self, max_age=30, min_hits=10, n_init=10, cn=True, hog=True, fixed_window=True, multi_scale=True, peak_threshold=0.4):
         """
         Sets key parameters for SORT
         """
@@ -26,6 +26,15 @@ class Sort(object):
         self.global_id = 1
         self.n_init = 10
         self.saved_paths = {}
+
+        # 下面是 kcf 滤波器的初始化参数
+        # 是否使用 raw_pixel 颜色特征
+        self.cn = cn
+        # 是否使用 fhog 特征
+        self.hog = hog
+        self.fixed_window = fixed_window
+        self.multi_scale = multi_scale
+        self.peak_threshold = peak_threshold
 
     # 将 (top_x, top_y, bottom_x, bottom_x, bottom_y) 转变为 (center_x, center_y, aspect ratio, h)
     # aspect ratio = width / height
@@ -40,7 +49,6 @@ class Sort(object):
 
         return ret
 
-    @jit
     def save_path(self):
         for track in self.tracks:
             if track.is_deleted() and track.downward():
@@ -63,7 +71,7 @@ class Sort(object):
     """
     :param dets: 输入的 dets 是检测结果，形式为 [x1, y1, x2, y2, score]
     """
-    def update(self, frame, detections):
+    def update(self, frame, frame_count, detections):
         """
         Params:
         dets - a numpy array of detections in the format [[x,y,w,h,score],[x,y,w,h,score],...]
@@ -120,7 +128,7 @@ class Sort(object):
                 # 检测器的 bbox 结果，并用其来更新 tracker 中的卡尔曼滤波器
                 trk = self.tracks[track_idx]
                 detection = detections[detection_idx]
-                trk.update(frame, self.kf, detection.to_tlwh(), detection.to_tlbr(), detections[detection_idx].to_xyah())
+                trk.update(frame, frame_count, self.kf, detection.to_tlwh(), detection.to_tlbr(), detections[detection_idx].to_xyah())
 
             for track_idx in unmatched_trks:
                 self.tracks[track_idx].mark_missed()
@@ -131,7 +139,8 @@ class Sort(object):
                 det = detections[detection_idx]
                 mean, covariance = self.kf.initiate(det.to_xyah())
                 # 将新增的未匹配的检测结果 dets[i, :] 传入到 Tracker，从而重新创建一个 tracker
-                trk = Track(det.to_tlbr(), mean, covariance, self.generate_id(), self.n_init, self.max_age)
+                trk = Track(frame_count, det.to_tlbr(), mean, covariance, self.generate_id(), self.n_init, self.max_age, self.cn,
+                                    self.hog, self.fixed_window, self.multi_scale, self.peak_threshold)
                 # 初始化 tracker 中的 kcf 跟踪器
                 trk.init_kcf(frame, det.tlwh)
                 # 将刚刚创建和初始化的跟踪器 trk 传入到 trackers 中
@@ -142,11 +151,12 @@ class Sort(object):
 
         i = len(self.tracks)
         # tracker_copy 用来保存 tracker，在图片上画出轨迹
-        tracker_copy = []
+        tracker_downward = []
         # 对这一帧中的 tracker 进行倒序遍历
         for trk in reversed(self.tracks):
             # 获取 tracker 跟踪器的状态 [x1, y1, x2, y2]
             d = trk.to_tlbr()
+
             # 同时满足以下两个条件的 tracker 才能够返回:
             # 1.tracker 没有匹配上 detection 的次数少于 max_age 次
             # 2.tracker 最近 10 帧连续下落，并且每一帧下落的距离满足要求
@@ -155,14 +165,15 @@ class Sort(object):
                 # tracker 的 hit_streak 就会被重置为 0
                 if (trk.hits >= self.min_hits or self.frame_count <= self.min_hits) and trk.time_since_update == 0:
                     ret.append(np.concatenate((d, [trk.track_id])).reshape(1, -1))  # +1 as MOT benchmark requires positive
-                tracker_copy.append(trk)
+                tracker_downward.append(trk)
             i -= 1
+
             # remove dead tracker
             # 如果当前 tracker 已经有 max_age 次没有目标匹配上，则说明此 track 跟踪的物体已经离开了画面，所以将其从 tracker 集合中删除
-            # if trk.time_since_update > self.max_age:
-            #     self.tracks.remove(trk)
+            if trk.time_since_update > self.max_age:
+                self.tracks.remove(trk)
 
         if len(ret) > 0:
-            return np.concatenate(ret), tracker_copy, trks
+            return np.concatenate(ret), tracker_downward
 
-        return np.empty((0, 5)), tracker_copy, trks
+        return np.empty((0, 5)), tracker_downward

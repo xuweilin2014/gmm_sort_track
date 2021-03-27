@@ -18,7 +18,7 @@ kcf1 tracker 跟踪算法主要使用了三个公式：核回归训练提速、�
 上一帧目标框中心的偏移量，然后移动目标框，使得新的最大响应值的位置在目标框中心。然后再调用 tracker#train 方法，根据新读入的图像，更新模板以及核线性回归参数 alpha
 '''
 class KCFTracker:
-    def __init__(self, hog=False, fixed_window=True, multiscale=False, peak_threshold=0.4):
+    def __init__(self, cn=False, hog=False, fixed_window=True, multiscale=False, peak_threshold=0.4):
         # 岭回归中的 lambda 常数，正则化
         self.lambdar = 0.0001   # regularization
         # extra area surrounding the target
@@ -28,7 +28,12 @@ class KCFTracker:
         self.output_sigma_factor = 0.125   # bandwidth of gaussian target
         self.peak_threshold = peak_threshold
 
-        if hog:
+        # 是否使用 fhog 特征
+        self._hog_feature = hog
+        # 是否使用 raw_pixel 特征
+        self._cn_feature = cn
+
+        if hog or cn:
             # HOG feature
             self.interp_factor = 0.012   # linear interpolation factor for adaptation、
             # gaussian kernel bandwidth
@@ -37,14 +42,12 @@ class KCFTracker:
             # hog 元胞数组尺寸
             # Hog cell size
             self.cell_size = 4
-            self._hogfeatures = True
         # raw gray-scale image
         # aka CSK tracker
         else:
             self.interp_factor = 0.075
             self.sigma = 0.2
             self.cell_size = 1
-            self._hogfeatures = False
 
         if multiscale:
             # 模板大小，在计算 _tmpl_sz 时，较大边长被归一成 96，而较小的边按比例缩小
@@ -91,7 +94,7 @@ class KCFTracker:
         hann2t = 0.5 * (1 - np.cos(2 * np.pi * hann2t / (self.size_patch[0] - 1)))
         hann2d = hann2t * hann1t
 
-        if self._hogfeatures:
+        if self._hog_feature:
             hann1d = hann2d.reshape(self.size_patch[0] * self.size_patch[1])
             self.hann = np.zeros((self.size_patch[2], 1), np.float32) + hann1d
         # 相当于把 1d 的汉宁窗赋值成多个通道
@@ -129,7 +132,7 @@ class KCFTracker:
         3.计算 xf1[i] 和 xf2[i] 的共轭在频域的点积（element-wise），这样得到的是 36 个 [m,n] 的复数矩阵，分别对每个矩阵都进行傅里叶逆变换得到 xf12[36],
         是 36 个 [m,n] 的实数矩阵，然后把 36 个矩阵对应点求和得到一个矩阵记作 xf12，是一个 [m,n] 的实数矩阵
         """
-        if self._hogfeatures:
+        if self._hog_feature or self._cn_feature:
             c = np.zeros((self.size_patch[0], self.size_patch[1]), np.float32)
             for i in range(self.size_patch[2]):
                 # 将 x1[i], x2[i] 转变为 [m,n] 的矩阵
@@ -188,7 +191,7 @@ class KCFTracker:
                 self._tmpl_sz[1] = int(padded_h)
                 self._scale = 1.
 
-            if self._hogfeatures:
+            if self._hog_feature or self._cn_feature:
                 # 由于后面提取 hog 特征时会以 cell 单元的形式提取，另外由于需要将频域直流分量移动到图像中心，因此需保证图像大小为 cell大小的偶数倍，
                 # 另外，在 hog 特征的降维的过程中是忽略边界 cell 的，所以还要再加上两倍的 cell 大小
                 self._tmpl_sz[0] = int(self._tmpl_sz[0]) // (2 * self.cell_size) * 2 * self.cell_size + 2 * self.cell_size
@@ -208,10 +211,11 @@ class KCFTracker:
         if z.shape[1] != self._tmpl_sz[0] or z.shape[0] != self._tmpl_sz[1]:
             z = cv2.resize(z, tuple(self._tmpl_sz))
 
-        if self._hogfeatures:
+        # 如果同时使用了 fhog + raw_pixel 颜色特征
+        if self._hog_feature and self._cn_feature:
             h, w = z.shape[:2]
             img = cv2.resize(z, (w + 2 * self.cell_size, h + 2 * self.cell_size))
-            mapp = {'sizeX': 0, 'sizeY': 0, 'numFeatures': 0, 'map': 0}
+            mapp = {'sizeX': 0, 'sizeY': 0, 'hogFeatures': 0, 'cnFeatures': 0, 'map': 0}
             # 对目标图像进行处理，获取到方向梯度直方图，mapp['map'] 的 shape 为 [sizeY, sizeX, 27]
             mapp = fhog.getFeatureMaps(img, self.cell_size, mapp)
             # 对目标图像的 cell 进行邻域归一化以及截断操作，得到的特征矩阵的 shape 为 [sizeY, sizeX, 108]，每一个 cell 的维度为 108 = 4 * 27 维
@@ -219,14 +223,46 @@ class KCFTracker:
             # 对目标图像进行 PCA 降维，将每一个 cell 的维度由 108 维变为 27 + 4 = 31 维，得到的特征矩阵的 shape 为 [sizeY, sizeX, 31]
             mapp = fhog.PCAFeatureMaps(mapp)
 
-            self.size_patch = list(map(int, [mapp['sizeY'], mapp['sizeX'], mapp['numFeatures']]))
+            self.size_patch = list(map(int, [mapp['sizeY'], mapp['sizeX'], mapp['hogFeatures']]))
             hog_feature = mapp['map'].reshape((self.size_patch[0] * self.size_patch[1], self.size_patch[2])).T   # (size_patch[2], size_patch[0]*size_patch[1])
-            cn_feature = extract_cn_feature(z, self.cell_size)
+
+            cn_feature = extract_cn_feature(z, mapp, self.cell_size)
+            mapp['cnFeatures'] = cn_feature.shape[0]
             FeaturesMap = np.concatenate((hog_feature, cn_feature), axis=0)
 
             # size_patch 为列表，保存裁剪下来的特征图的 [长，宽，通道]
-            self.size_patch = list(map(int, [mapp['sizeY'], mapp['sizeX'], mapp['numFeatures'] + 11]))
-        # 将 RGB 图像转变为单通道灰度图像
+            self.size_patch = list(map(int, [mapp['sizeY'], mapp['sizeX'], mapp['hogFeatures'] + mapp['cnFeatures']]))
+
+        # 如果只使用了 fhog 特征
+        elif self._hog_feature:
+            h, w = z.shape[:2]
+            img = cv2.resize(z, (w + 2 * self.cell_size, h + 2 * self.cell_size))
+            mapp = {'sizeX': 0, 'sizeY': 0, 'hogFeatures': 0, 'map': 0}
+            # 对目标图像进行处理，获取到方向梯度直方图，mapp['map'] 的 shape 为 [sizeY, sizeX, 27]
+            mapp = fhog.getFeatureMaps(img, self.cell_size, mapp)
+            # 对目标图像的 cell 进行邻域归一化以及截断操作，得到的特征矩阵的 shape 为 [sizeY, sizeX, 108]，每一个 cell 的维度为 108 = 4 * 27 维
+            mapp = fhog.normalizeAndTruncate(mapp, 0.2)
+            # 对目标图像进行 PCA 降维，将每一个 cell 的维度由 108 维变为 27 + 4 = 31 维，得到的特征矩阵的 shape 为 [sizeY, sizeX, 31]
+            mapp = fhog.PCAFeatureMaps(mapp)
+
+            self.size_patch = list(map(int, [mapp['sizeY'], mapp['sizeX'], mapp['hogFeatures']]))
+            hog_feature = mapp['map'].reshape((self.size_patch[0] * self.size_patch[1], self.size_patch[2])).T  # (size_patch[2], size_patch[0]*size_patch[1])
+            FeaturesMap = hog_feature
+
+        # 如果只使用了 raw_pixel 颜色特征
+        elif self._cn_feature:
+            h, w = z.shape[:2]
+            img = cv2.resize(z, (w + 2 * self.cell_size, h + 2 * self.cell_size))
+            mapp = {'sizeX': 0, 'sizeY': 0, 'cnFeatures': 0, 'map': 0}
+
+            cn_feature = extract_cn_feature(img, mapp, self.cell_size)
+            mapp['cnFeatures'] = cn_feature.shape[0]
+            FeaturesMap = cn_feature
+            inithann = False
+            # size_patch 为列表，保存裁剪下来的特征图的 [长，宽，通道]
+            self.size_patch = list(map(int, [mapp['sizeY'], mapp['sizeX'], mapp['cnFeatures']]))
+
+        # 如果既没有使用 raw_pixel 颜色特征也没有使用 fhog 特征，那么使用灰度图像特征，将 RGB 图像转变为单通道灰度图像
         else:
             if z.ndim == 3 and z.shape[2] == 3:
                 FeaturesMap = cv2.cvtColor(z, cv2.COLOR_BGR2GRAY)   # z:(size_patch[0], size_patch[1], 3)  FeaturesMap:(size_patch[0], size_patch[1])   #np.int8  #0~255
@@ -238,9 +274,8 @@ class KCFTracker:
 
         if inithann:
             self.createHanningMats()  # create Hanning Mats need size_patch
-
-        # 加汉宁窗减少频谱泄漏
-        FeaturesMap = self.hann * FeaturesMap
+            # 加汉宁窗减少频谱泄漏
+            FeaturesMap = self.hann * FeaturesMap
 
         return FeaturesMap
 

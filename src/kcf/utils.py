@@ -67,10 +67,12 @@ def limit(rect, limit):
     if rect[1] < limit[1]:
         rect[3] -= (limit[1] - rect[1])
         rect[1] = limit[1]
-    if rect[2] < 0:
-        rect[2] = 0
-    if rect[3] < 0:
-        rect[3] = 0
+
+    if rect[2] <= 0:
+        rect[2] = 1
+    if rect[3] <= 0:
+        rect[3] = 1
+
     return rect
 
 
@@ -101,24 +103,15 @@ def subwindow(img, window, borderType=cv2.BORDER_CONSTANT):
 
     return res
 
-def extract_hog_feature(img, cell_size):
-    h, w = img.shape[:2]
-    img = cv2.resize(img, (w + 2 * cell_size, h + 2 * cell_size))
-    mapp = {'sizeX': 0, 'sizeY': 0, 'numFeatures': 0, 'map': 0}
-    # 对目标图像进行处理，获取到方向梯度直方图，mapp['map'] 的 shape 为 [sizeY, sizeX, 27]
-    mapp = fhog.getFeatureMaps(img, cell_size, mapp)
-    # 对目标图像的 cell 进行邻域归一化以及截断操作，得到的特征矩阵的 shape 为 [sizeY, sizeX, 108]，每一个 cell 的维度为 108 = 4 * 27 维
-    mapp = fhog.normalizeAndTruncate(mapp, 0.2)
-    # 对目标图像进行 PCA 降维，将每一个 cell 的维度由 108 维变为 27 + 4 = 31 维，得到的特征矩阵的 shape 为 [sizeY, sizeX, 31]
-    mapp = fhog.PCAFeatureMaps(mapp)
+def extract_cn_feature(img, mapp, cell_size=1):
+    height, width = img.shape[:2]
+    sizeX = width // cell_size
+    sizeY = height // cell_size
+    mapp['sizeX'] = sizeX
+    mapp['sizeY'] = sizeY
 
-    size_patch = list(map(int, [mapp['sizeY'], mapp['sizeX'], mapp['numFeatures']]))
-    hog_feature = mapp['map'].reshape((size_patch[0] * size_patch[1], size_patch[2])).T  # (size_patch[2], size_patch[0]*size_patch[1])
-    return hog_feature, size_patch
-
-def extract_cn_feature(img, cell_size=1):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255 - 0.5
-    cn = TableFeature(fname='cn', cell_size=cell_size, compressed_dim=31, table_name="CNnorm", use_for_color=True)
+    cn = TableFeature(fname='raw_pixel', cell_size=cell_size, compressed_dim=31, table_name="CNnorm", use_for_color=True)
 
     if np.all(img[:, :, 0] == img[:, :, 1]):
         img = img[:, :, :1]
@@ -132,4 +125,5 @@ def extract_cn_feature(img, cell_size=1):
 
     shape = cn_feature.shape
     cn_feature.resize(shape[2], shape[0] * shape[1])
+
     return cn_feature
