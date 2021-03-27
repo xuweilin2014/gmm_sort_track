@@ -120,13 +120,13 @@ class Detector(object):
 
         file_path = ''
         if self.hog and self.cn:
-            file_path = '../../../output/samf/samf_test.txt'
+            file_path = '../../../output/mot_metrics/fhog_cn/fhog_cn.txt'
         elif self.hog:
-            file_path = '../../../output/fhog/hog_test.txt'
+            file_path = '../../../output/fhog/fhog.txt'
         elif self.cn:
-            file_path = '../../../output/cn/cn_test.txt'
+            file_path = '../../../output/mot_metrics/cn/cn.txt'
         elif not self.hog and not self.cn:
-            file_path = '../../../output/raw_pixel/raw_pixel_test.txt'
+            file_path = '../../../output/raw_pixel/raw_pixel.txt'
 
         f = open(file_path, 'w')
         for frame_count in sorted(obj_dict):

@@ -47,5 +47,5 @@ def append_test_metrics(name_list):
 
 
 if __name__ == '__main__':
-    names = ['../../../output/cn/cn_test.txt']
+    names = ['../../../output/cn/cn.txt']
     append_test_metrics(names)
