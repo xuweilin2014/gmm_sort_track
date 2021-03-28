@@ -22,7 +22,7 @@ class Detector(object):
         self.cn = cn
 
     # noinspection PyAttributeOutsideInit
-    def catch_video(self, video_index, min_area):
+    def catch_video(self, video_index, min_area, record=False):
         cap = cv2.VideoCapture(video_index)  # 创建摄像头识别类
         tracker = Sort(cn=self.cn, hog=self.hog)
 
@@ -115,6 +115,14 @@ class Detector(object):
             cv2.imshow("mask", mask)
             cv2.waitKey(10)
 
+        if record:
+            self.record_metrics(cap, begin_time, obj_dict)
+
+        # 释放摄像头
+        cap.release()
+        cv2.destroyAllWindows()
+
+    def record_metrics(self, cap, begin_time, obj_dict):
         end_time = time.time()
         fps = cap.get(7) / (end_time - begin_time)
 
@@ -128,15 +136,11 @@ class Detector(object):
         elif not self.hog and not self.cn:
             file_path = '../../../output/raw_pixel/raw_pixel.txt'
 
-        f = open(file_path, 'w')
-        for frame_count in sorted(obj_dict):
-            for path in obj_dict.get(frame_count):
-                f.write(','.join([str(_) for _ in path]) + '\n')
-        f.write('视频帧率：' + str(fps))
-        f.close()
-        # 释放摄像头
-        cap.release()
-        cv2.destroyAllWindows()
+        with open(file_path, 'w') as f:
+            for frame_count in sorted(obj_dict):
+                for path in obj_dict.get(frame_count):
+                    f.write(','.join([str(_) for _ in path]) + '\n')
+            f.write('视频帧率：' + str(fps))
 
     @staticmethod
     def get_center(det):

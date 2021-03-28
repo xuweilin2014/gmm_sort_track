@@ -60,7 +60,7 @@ class KalmanFilter(object):
         for i in range(ndim):
             self._motion_mat[i, ndim + i] = self.dt
 
-        self._control_mat = np.transpose(np.array([0.5, 0.5, 0.005, 0.005, 1, 2.8, 0.001, 0.002]))
+        self._control_mat = np.transpose(np.array([0.5, 0.5, 0.005, 0.005, 1, 2.8, 0.0005, 0.001]))
         self.u = 1
 
         '''
