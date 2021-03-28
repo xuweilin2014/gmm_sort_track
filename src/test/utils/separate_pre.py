@@ -22,6 +22,7 @@ def separate_predictions(dirs, mot_path, vot_path):
                 if '视频' in line:
                     continue
 
+                line = line.strip()
                 box = [_ for _ in line.split(',')]
                 id = box[1]
                 vot_file_path = vot_dir_path + '/' + id + '.txt'

@@ -46,7 +46,7 @@ class Detector(object):
 
             dets = np.asarray(dets)
             tracker.predict()
-            ret, tracks = tracker.update(frame, dets)
+            ret, tracks = tracker.update(frame, frame_count, dets)
 
             boxes = []
             indexIDs = []

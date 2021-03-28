@@ -161,18 +161,18 @@ if __name__ == "__main__":
     video_path = '../../../input/p.mp4'
     min_area = 130
 
-    detector = Detector(name='test', hog=True, cn=False)
-    detector.catch_video(video_path, min_area=min_area)
-    logging.info('fhog 特征的 test 文件生成完毕')
-
-    detector = Detector(name='test', hog=True, cn=True)
-    detector.catch_video(video_path, min_area=min_area)
-    logging.info('fhog 与 raw_pixel 颜色特征的 test 文件生成完毕')
+    # detector = Detector(name='test', hog=True, cn=False)
+    # detector.catch_video(video_path, min_area=min_area)
+    # logging.info('fhog 特征的 test 文件生成完毕')
+    #
+    # detector = Detector(name='test', hog=True, cn=True)
+    # detector.catch_video(video_path, min_area=min_area)
+    # logging.info('fhog 与 raw_pixel 颜色特征的 test 文件生成完毕')
 
     detector = Detector(name='test', hog=False, cn=False)
     detector.catch_video(video_path, min_area=min_area)
     logging.info('raw_pixel 普通灰度特征的 test 文件生成完毕')
 
-    detector = Detector(name='test', hog=False, cn=True)
-    detector.catch_video(video_path, min_area=min_area)
-    logging.info('cn 颜色特征的 test 文件生成完毕')
+    # detector = Detector(name='test', hog=False, cn=True)
+    # detector.catch_video(video_path, min_area=min_area)
+    # logging.info('cn 颜色特征的 test 文件生成完毕')
