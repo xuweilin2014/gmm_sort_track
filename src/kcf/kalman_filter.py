@@ -114,6 +114,7 @@ class KalmanFilter(object):
         # 主要根据目标的高度构造协方差矩阵
         # 对 std 中的每个元素平方，np.diag 构成一个 8*8 的对象矩阵，对角线上的元素是 np.square(std)
         covariance = np.diag(np.square(std))
+
         return mean, covariance
 
     def predict(self, mean, covariance):

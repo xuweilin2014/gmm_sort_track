@@ -69,14 +69,14 @@ def compute_ope(dirs, mot_path, groundtruth_path):
 
         x = dists
         y = [_ / (float(547)) for _ in vor_per.values()]
-        plt.title('Success plots of OPE')
+        plt.title('Precision plots of OPE')
         label = dir.replace('_', ' ')
 
         plt.plot(x, y, linewidth=2, label=label)
 
     plt.legend()
     plt.xlabel('Location error threshold')
-    plt.ylabel('Success rate')
+    plt.ylabel('Precision')
     plt.grid()
     plt.savefig("ope.png", dpi=900, bbox_inches='tight')
     plt.show()

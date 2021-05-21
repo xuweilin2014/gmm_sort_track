@@ -1,12 +1,12 @@
 import cv2
 from time import sleep
-from sort import Sort
+from old_sort.sort import Sort
 import numpy as np
-
+import time
 
 class Detector(object):
 
-    def __init__(self, name='my_video', frame_num=10, k_size=7, color=(0, 255, 0)):
+    def __init__(self, name='my_video', color=(0, 255, 0)):
 
         self.name = name
         self.color = color
@@ -27,10 +27,18 @@ class Detector(object):
         self.frame_num = 0
         self.mog = cv2.createBackgroundSubtractorMOG2(detectShadows=False)
 
+        begin_time = time.time()
+
         while cap.isOpened():
             sleep(0.1)
 
-            mask, frame = self.gaussian_bk(cap)
+            catch, frame = cap.read()  # 读取每一帧图片
+
+            if not catch:
+                print('The end of the video.')
+                break
+
+            mask, frame = self.gaussian_bk(frame)
 
             frame_count += 1
 
@@ -88,15 +96,17 @@ class Detector(object):
                             color = [int(c) for c in COLORS[(track.id + 1) % len(COLORS)]]
                             cv2.line(frame, (self.get_center(dets[i])), (self.get_center(dets[i - 1])), color, 3)
 
+            cv2.imwrite('../../output/trajectory/old/' + str(frame_count) + '.jpg', frame)
             cv2.namedWindow("result", 0)
             cv2.resizeWindow("result", 600, 800)
             cv2.imshow("result", frame)
             cv2.waitKey(10)
 
+        end_time = time.time()
+        print("fps: " + str((cap.get(7) / (end_time - begin_time))))
+
         # 释放摄像头
         cap.release()
-        out_mask.release()
-        out_frame.release()
         cv2.destroyAllWindows()
 
     @staticmethod
@@ -105,12 +115,7 @@ class Detector(object):
             return int((det[0] + det[2]) / 2), int((det[1] + det[3]) / 2)
         return None
 
-    def gaussian_bk(self, cap, k_size=3):
-
-        catch, frame = cap.read()  # 读取每一帧图片
-
-        if not catch:
-            print('The end of the video.')
+    def gaussian_bk(self, frame, k_size=3):
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         mask = self.mog.apply(gray).astype('uint8')
@@ -121,4 +126,4 @@ class Detector(object):
 
 if __name__ == "__main__":
     detector = Detector(name='test')
-    detector.catch_video('./input/p.mp4', min_area=500)
+    detector.catch_video('../../input/p.mp4', min_area=500)

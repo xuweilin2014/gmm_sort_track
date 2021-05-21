@@ -22,7 +22,7 @@ class Detector(object):
         self.cn = cn
 
     # noinspection PyAttributeOutsideInit
-    def catch_video(self, video_index, min_area, record=False):
+    def catch_video(self, video_index, min_area, record=False, trajectory=False):
         cap = cv2.VideoCapture(video_index)  # 创建摄像头识别类
         tracker = Sort(cn=self.cn, hog=self.hog)
 
@@ -104,15 +104,16 @@ class Detector(object):
                     for i in range(len(bboxes)):
                         if i > 0:
                             color = [int(c) for c in COLORS[id % len(COLORS)]]
-                            cv2.line(frame, (self.get_center(bboxes[i][1:])), (self.get_center(bboxes[i - 1][1:])), color, 3)
-
-            cv2.namedWindow("result", 0)
-            cv2.resizeWindow("result", 600, 1000)
-            cv2.imshow("result", frame)
+                            cv2.line(frame, (self.get_center(bboxes[i][1:])), (self.get_center(bboxes[i - 1][1:])), color, 15)
 
             mask = np.expand_dims(mask, 2).repeat(3, axis=2)
+            if trajectory:
+                self.record_trajectory(frame_count, frame, mask)
 
-            cv2.imshow("mask", mask)
+            cv2.namedWindow("result", 0)
+            cv2.resizeWindow("result", 600, 800)
+            cv2.imshow("result", frame)
+
             cv2.waitKey(10)
 
         if record:
@@ -142,6 +143,20 @@ class Detector(object):
                     f.write(','.join([str(_) for _ in path]) + '\n')
             f.write('视频帧率：' + str(fps))
 
+    def record_trajectory(self, frame_count, frame, mask):
+        trk_path = ''
+        if self.hog and self.cn:
+            trk_path = '../../../output/trajectory/fhog_cn/'
+        elif self.hog:
+            trk_path = '../../../output/trajectory/fhog/'
+        elif self.cn:
+            trk_path = '../../../output/trajectory/cn/'
+        elif not self.hog and not self.cn:
+            trk_path = '../../../output/trajectory/raw_pixel/'
+
+        cv2.imwrite(trk_path + str(frame_count) + '.jpg', frame)
+        cv2.imwrite(trk_path + str(frame_count) + '_mask.jpg', mask)
+
     @staticmethod
     def get_center(det):
         if det is not None:
@@ -161,18 +176,18 @@ if __name__ == "__main__":
     video_path = '../../../input/p.mp4'
     min_area = 130
 
-    # detector = Detector(name='test', hog=True, cn=False)
-    # detector.catch_video(video_path, min_area=min_area)
-    # logging.info('fhog 特征的 test 文件生成完毕')
-    #
-    # detector = Detector(name='test', hog=True, cn=True)
-    # detector.catch_video(video_path, min_area=min_area)
-    # logging.info('fhog 与 raw_pixel 颜色特征的 test 文件生成完毕')
+    detector = Detector(name='test', hog=True, cn=False)
+    detector.catch_video(video_path, min_area=min_area, trajectory=True)
+    logging.info('fhog 特征的实验执行完毕')
+
+    detector = Detector(name='test', hog=True, cn=True)
+    detector.catch_video(video_path, min_area=min_area, trajectory=True)
+    logging.info('fhog 与 cn 颜色特征的实验执行完毕')
 
     detector = Detector(name='test', hog=False, cn=False)
-    detector.catch_video(video_path, min_area=min_area)
-    logging.info('raw_pixel 普通灰度特征的 test 文件生成完毕')
+    detector.catch_video(video_path, min_area=min_area, trajectory=True)
+    logging.info('raw_pixel 普通灰度特征的实验执行完毕')
 
-    # detector = Detector(name='test', hog=False, cn=True)
-    # detector.catch_video(video_path, min_area=min_area)
-    # logging.info('cn 颜色特征的 test 文件生成完毕')
+    detector = Detector(name='test', hog=False, cn=True)
+    detector.catch_video(video_path, min_area=min_area, trajectory=True)
+    logging.info('cn 颜色特征的实验执行完毕')
