@@ -22,10 +22,10 @@ class KCFTracker:
         # 岭回归中的 lambda 常数，正则化
         self.lambdar = 0.0001   # regularization
         # extra area surrounding the target
-        # 在目标框附近填充的区域
+        # 在目标框附近填充的区域大小系数
         self.padding = 2.5
         # bandwidth of gaussian target
-        self.output_sigma_factor = 0.125   # bandwidth of gaussian target
+        self.output_sigma_factor = 0.125
         self.peak_threshold = peak_threshold
 
         # 是否使用 fhog 特征
@@ -34,8 +34,9 @@ class KCFTracker:
         self._cn_feature = cn
 
         if hog or cn:
-            # HOG feature
-            self.interp_factor = 0.012   # linear interpolation factor for adaptation、
+            # HOG feature, linear interpolation factor for adaptation
+            # 用于在 train 方法中进行训练时，对相关系数 alpha 和 template 进行在线更新
+            self.interp_factor = 0.012
             # gaussian kernel bandwidth
             # 高斯卷积核的带宽
             self.sigma = 0.6
@@ -56,6 +57,7 @@ class KCFTracker:
             # scale step for multi-scale estimation
             self.scale_step = 1.05
             # to downweight detection scores of other scales for added stability
+            # 对于其它尺度的响应值，都会乘以 0.96，也就是乘以一个惩罚系数
             self.scale_weight = 0.96
         elif fixed_window:
             self.template_size = 96
@@ -77,7 +79,10 @@ class KCFTracker:
     def init(self, roi, image):
         self._roi = list(map(float, roi))
         assert (roi[2] > 0 and roi[3] > 0)
-        # _tmpl 是从目标图像中所获取到的 fhog 特征矩阵，shape 为 [sizeX, sizeY, 31]
+        # _tmpl 是从目标图像中所获取到的 fhog 特征矩阵，shape 为 [sizeX, sizeY, 特征维数]
+        # 当特征为 cn 特征的话，那么就为 11 维
+        # 当特征为 fhog 特征的话，那么就为 31 维
+        # 当特征为 cn + fhog 的话，就为 11 + 31 = 42 维
         self._tmpl = self.getFeatures(image, 1)
         # _prob 是初始化时的高斯响应图，也就是在目标框的中心位置响应值最大
         self._prob = self.createGaussianPeak(self.size_patch[0], self.size_patch[1])
@@ -115,6 +120,7 @@ class KCFTracker:
         y, x = np.ogrid[0:sizey, 0:sizex]
         y, x = (y - syh) ** 2, (x - sxh) ** 2
         res = np.exp(mult * (y + x))
+        # 返回的标签 res 会进行快速傅里叶变换，也就是核相关滤波训练中的 y_hat
         return fftd(res)
 
     # 核相关矩阵计算提速，这里使用的是高斯核函数，其中 x1, x2 必须都是 M * N 的大小
@@ -174,6 +180,7 @@ class KCFTracker:
 
         if inithann:
             # 保持初始目标框中心不变，将目标框的宽和高同时扩大相同倍数
+            # 将目标框扩大 padding 倍是因为需要对目标框中的目标进行循环移位（x, y 两个方向）
             padded_w = self._roi[2] * self.padding
             padded_h = self._roi[3] * self.padding
 
@@ -279,7 +286,7 @@ class KCFTracker:
 
         return FeaturesMap
 
-    # 根据上一帧结果计算当前帧的目标位置
+    # 根据上一帧结果使用快速检测公式计算当前帧中目标的位置，以及偏离采样中心的位移和峰值
     # z 是前一帧的训练（第一帧的初始化）模板 self._tmpl，x 是当前帧 fhog 特征，peak_value 是检测结果峰值
     def detect(self, z, x):
         # 使用高斯核函数求解核相关矩阵
@@ -291,7 +298,7 @@ class KCFTracker:
         # pv:响应最大值，pi:响应最大点的索引数组: (列下标，行下标)
         _, pv, _, pi = cv2.minMaxLoc(res)   # pv:float  pi:tuple of int
         # 得到响应最大的点索引的 float 表示
-        p = [float(pi[0]), float(pi[1])]   # cv::Point2f, [x,y]  #[float,float]
+        p = [float(pi[0]), float(pi[1])]   # [x,y], [float,float]
 
         # 使用幅值作差来定位峰值的位置
         # 也就是对于该响应矩阵，找出其最大响应值 peak_value 和最大响应位置 pxy，如果最大响应位置不在图像边界，那么
@@ -316,7 +323,8 @@ class KCFTracker:
         # 使用高斯核函数计算核相关矩阵 k
         k = self.gaussianCorrelation(x, x)
         # 求解线性回归系数，alpha_hat = (1 / (k_hat + lamda)) * y_hat，求解出来的线性回归系数会在快速检测中使用到
-        # 其中 y_hat 就是制作的响应标签
+        # 其中 y_hat 就是制作的响应标签（self._prob），由于 self._prob 在 createGaussianPeak 方法中返回时已经经过了 fft 变换，
+        # 所以可以直接使用在公式中
         alphaf = complexDivision(self._prob, fftd(k) + self.lambdar)
 
         # 模板更新: template = (1 - 0.012) * template + 0.012 * z
@@ -328,6 +336,7 @@ class KCFTracker:
     # 获取当前帧的目标位置以及尺度，image 为当前帧的整幅图像
     # 基于当前帧更新目标位置
     def update(self, image):
+        # roi 为 [x, y, width, height]
         roi = self._roi
         # 修正边界
         if roi[0] + roi[2] <= 0:
@@ -351,12 +360,15 @@ class KCFTracker:
         # _scale = _scale * (1 / scale_step)
         # T_w_h = T_w_h * (1 / scale_step)
         # T_x_y = T_cx_cy - T_w_h / 2 + res_x_y * cell_size * _scale
+
         if self.scale_step != 1:
-            # Test at a smaller _scale
+            # Test at a smaller_scale
             new_loc1, new_peak_value1 = self.detect(self._tmpl, self.getFeatures(image, 0, 1.0 / self.scale_step))
-            # Test at a bigger _scale
+            # Test at a bigger_scale
             new_loc2, new_peak_value2 = self.detect(self._tmpl, self.getFeatures(image, 0, self.scale_step))
 
+            # 在计算其他尺度的响应时，会乘以一个惩罚系数，并且会把 T_w_h 乘以 scale_step
+            # 或者除以 scale_step 进行尺度缩小和扩大。self._scale 表示的是扩展框（padding 之后的图像）与模板图像尺寸的比例
             if self.scale_weight * new_peak_value1 > peak_value and new_peak_value1 > new_peak_value2:
                 loc = new_loc1
                 peak_value = new_peak_value1

@@ -43,13 +43,13 @@ class KalmanFilter(object):
         self.dt = 1.
         ndim = 4
 
-        # Create Kalman filter model matrices.
+        # create kalman filter model matrices.
         '''
         初始化状态转移矩阵 A 为:
         [[1, 0, 0, 0, dt, 0, 0, 0],
          [0, 1, 0, 0, 0, dt, 0, 0],
          [0, 0, 1, 0, 0, 0, dt, 0],
-         [0, 0, 0, 0, 1, 0, 0, dt],
+         [0, 0, 0, 1, 0, 0, 0, dt],
          [0, 0, 0, 0, 1, 0, 0, 0],
          [0, 0, 0, 0, 0, 1, 0, 0],
          [0, 0, 0, 0, 0, 0, 1, 0],
