@@ -3,6 +3,17 @@ import numpy as np
 from table_feature import TableFeature
 import fhog
 
+def correct_bounding(roi, frame):
+    # 修正边界
+    if roi[0] + roi[2] <= 0:
+        roi[0] = -roi[2] + 1
+    if roi[1] + roi[3] <= 0:
+        roi[1] = -roi[3] + 1
+    if roi[0] >= frame.shape[1] - 1:
+        roi[0] = frame.shape[1] - 1
+    if roi[1] >= frame.shape[0] - 1:
+        roi[1] = frame.shape[0] - 1
+
 # 离散傅立叶、逆变换
 def fftd(img, backwards=False):
     # shape of img can be (m,n), (m,n,1) or (m,n,2)
@@ -54,30 +65,39 @@ def y2(rect):
     return rect[1] + rect[3]
 
 # limit 的值一定为 [0, 0, image.width, image.height]
+# rect 为一个 roi，形式为 [x, y, width, height]
 def limit(rect, limit):
+    # 如果 x + width > image.width，也就是 rect 图像的右侧一部分是在 image 图像之外，那么就将 width 调整为在图像内的长度
     if rect[0] + rect[2] > limit[0] + limit[2]:
         rect[2] = limit[0] + limit[2] - rect[0]
+    # 如果 y + height > image.height, 也就是 rect 图像的下侧一部分是在 image 图像之外，那么就将 height 调整为在图像内的长度
     if rect[1] + rect[3] > limit[1] + limit[3]:
         rect[3] = limit[1] + limit[3] - rect[1]
-    # 如果 rect[0] 也就是 x 是小于 0 的，说明 rect 图像有一部分是在 image 图像之外，那么就将 width 调整为在图像内的长度
+
+    # 如果 rect[0] 也就是 x 是小于 0 的，说明 rect 左侧图像有一部分是在 image 图像之外，那么就将 width 调整为在图像内的长度
     if rect[0] < limit[0]:
         rect[2] -= (limit[0] - rect[0])
         rect[0] = limit[0]
-    # 如果 rect[1] 也就是 y 是小于 0 的，说明 rect 图像有一部分是在 image 图像之外，那么就将 height 调整为在图像内的长度
+
+    # 如果 rect[1] 也就是 y 是小于 0 的，说明 rect 上侧图像有一部分是在 image 图像之外，那么就将 height 调整为在图像内的长度
     if rect[1] < limit[1]:
         rect[3] -= (limit[1] - rect[1])
         rect[1] = limit[1]
 
-    if rect[2] <= 0:
-        rect[2] = 1
-    if rect[3] <= 0:
-        rect[3] = 1
+    if rect[2] < 0:
+        rect[2] = 0
+    if rect[3] < 0:
+        rect[3] = 0
 
     return rect
 
-
+# original 为 [x1, y1, w1, h1]
+# limited 为 [x2, y2, w2, h2]
 def getBorder(original, limited):
     res = [0, 0, 0, 0]
+
+    # 对于 limited 和 original 来说，(x2, y2) 永远大于 (x1, y1)，(x1 + w1, y1 + h1) 永远大于 (x2 + w2, y2 + h2)
+    # 这是因为，original 就是原始的 rect 区域图像，而 limited 则是 rect 区域在 image 图像内部的那一部分
     res[0] = limited[0] - original[0]
     res[1] = limited[1] - original[1]
     res[2] = x2(original) - x2(limited)
@@ -87,12 +107,17 @@ def getBorder(original, limited):
 
 # 经常需要空域或频域的滤波处理，在进入真正的处理程序前，需要考虑图像边界情况。
 # 通常的处理方法是为图像增加一定的边缘，以适应【卷积核】在原图像边界的操作。
+# subwindow 方法主要作用是判断 window 是否有在 image 图像外面的部分，如果有的话，就将外面的部分裁减掉，只保留 image 图像里面的
+# 部分，并且使用 res = img[...] 语句获得，而对外面的部分使用线性插值的方法进行填充，最后返回和原来 window 大小一样的图像块
 def subwindow(img, window, borderType=cv2.BORDER_CONSTANT):
-    cutWindow = [x for x in window]
-    limit(cutWindow, [0, 0, img.shape[1], img.shape[0]])   # modify cutWindow
-    assert(cutWindow[2] > 0 and cutWindow[3] > 0)
-    border = getBorder(window, cutWindow)
-    res = img[cutWindow[1]:cutWindow[1] + cutWindow[3], cutWindow[0]:cutWindow[0] + cutWindow[2]]
+    # cut_window = window
+    cut_window = [x for x in window]
+    # 如果 cut_window 图像有一部分是在 image 之外，则对 cut_window 的参数进行调整，舍弃掉外面的部分
+    limit(cut_window, [0, 0, img.shape[1], img.shape[0]])   # modify cutWindow
+    assert(cut_window[2] >= 0 and cut_window[3] >= 0)
+    # 比较 cut_window 和 window，然后获取到边界的大小，这个边界如果不为 0 的话，会在下面进行填充
+    border = getBorder(window, cut_window)
+    res = img[cut_window[1]:cut_window[1] + cut_window[3], cut_window[0]:cut_window[0] + cut_window[2]]
 
     # 由于 roi 区域可能会超出原图像边界，因此超出边界的部分填充为原图像边界的像素
     if border != [0, 0, 0, 0]:

@@ -2,6 +2,13 @@ import numpy as np
 import cv2
 from numba import jit
 
+import sys
+
+PY3 = sys.version_info >= (3,)
+
+if PY3:
+    xrange = range
+
 # constant
 NUM_SECTOR = 9
 FLT_EPSILON = 1e-07
@@ -13,16 +20,16 @@ https://www.jianshu.com/p/69a3e39c51f9
 https://zhuanlan.zhihu.com/p/56405827
 '''
 
-@jit
+@jit(cache=True)
 def func1(dx, dy, boundary_x, boundary_y, height, width, numChannels):
     # r.shape 为 [height, width]，height 为目标图像的高，width 为目标图像的宽度，r 也就是目标图像中每一个像素点的梯度值
     r = np.zeros((height, width), np.float32)
     # alfa.shape 为 [height, width, 2]，height, width 的意义同上，2 表示将每个像素点方向投影至 [0, 180) 和 [0, 360) 两个区间，
     # 从而每个像素点由两个不同的方向
-    alfa = np.zeros((height, width, 2), np.int)
+    alfa = np.zeros((height, width, 2), np.int32)
 
-    for j in range(1, height - 1):
-        for i in range(1, width - 1):
+    for j in xrange(1, height - 1):
+        for i in xrange(1, width - 1):
             '''
             step1.计算模板图像 RGB 三通道每个像素点的水平梯度被 dx 和垂直梯度 dy，计算各点的梯度幅值，并且以最大的梯度幅值所在通道为准
             '''
@@ -84,7 +91,7 @@ step5.方向梯度直方图的计算
 对于 cell 内每个像素点，将其梯度幅值分别以 [0,180) 和 [0,360) 两种投影区间累加至对应梯度方向直方图中，在按照上一步中提到的加权方式计算完 cell 特征之后，
 每个 cell 保留了 9+18 个方向的梯度。
 """
-@jit
+@jit(cache=True)
 def func2(r, alfa, nearest, w, k, height, width, sizeX, sizeY, p, stringSize):
     # mapp 是一个向量，相当于将所有 cell 的长度为 27 的向量拼接到一起形成
     # 不过 mapp 可以看成一个 shape 为 [sizeY, sizeX, P] 的矩阵，其中 p = 18 + 9 = 27
@@ -115,7 +122,7 @@ def func2(r, alfa, nearest, w, k, height, width, sizeX, sizeY, p, stringSize):
 # 开始进行邻域归一化
 # partOfNorm 的 shape 为 [sizeY, sizeX, p = 9]
 # mappmap 的 shape 为 [sizeY, sizeX, xp = 27]
-@jit
+@jit(cache=True)
 def func3(partOfNorm, mappmap, sizeX, sizeY, p, xp, pp):
     # newData 的 shape 为 [sizeY, sizeX, pp = 108]，其中 pp 就是每一个 cell 扩充之后的特征维度数目
     newData = np.zeros((sizeY * sizeX * pp), np.float32)
@@ -165,7 +172,7 @@ def func3(partOfNorm, mappmap, sizeX, sizeY, p, xp, pp):
     return newData
 
 
-@jit
+@jit(cache=True)
 def func4(mappmap, p, sizeX, sizeY, pp, yp, xp, nx, ny):
     # newData 矩阵的 shape 为 [sizeY, sizeX, pp = 31]
     newData = np.zeros((sizeX * sizeY * pp), np.float32)

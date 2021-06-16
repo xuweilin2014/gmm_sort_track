@@ -1,9 +1,9 @@
 from __future__ import print_function
+
 import numpy as np
+import cv2
 from associate import associate_detections_to_trackers, kcf_associate
 from track import Track
-import kalman_filter
-from numba import jit
 
 """
 SORT 跟踪算法到底在干什么？
@@ -12,17 +12,16 @@ SORT 跟踪算法到底在干什么？
 3.SORT 关联两个 BBox 的核心算法是：用 IoU 计算 Bbox 之间的距离 + 匈牙利算法选择最优关联结果
 """
 
-
 class Sort(object):
-    def __init__(self, max_age=30, min_hits=10, n_init=10, cn=True, hog=True, fixed_window=True, multi_scale=True, peak_threshold=0.4):
+    def __init__(self, max_age=30, min_hits=10, n_init=10, cn=True, hog=True, peak_threshold=0.4):
         """
         Sets key parameters for SORT
         """
         self.max_age = max_age
         self.min_hits = min_hits
-        self.tracks = []
+        self.tracks = np.array([])
         self.frame_count = 0
-        self.kf = kalman_filter.KalmanFilter()
+
         self.global_id = 1
         self.n_init = 10
         self.saved_paths = {}
@@ -32,8 +31,6 @@ class Sort(object):
         self.cn = cn
         # 是否使用 fhog 特征
         self.hog = hog
-        self.fixed_window = fixed_window
-        self.multi_scale = multi_scale
         self.peak_threshold = peak_threshold
 
     # 将 (top_x, top_y, bottom_x, bottom_x, bottom_y) 转变为 (center_x, center_y, aspect ratio, h)
@@ -66,10 +63,11 @@ class Sort(object):
 
     def predict(self):
         for track in self.tracks:
-            track.predict(self.kf)
+            # 主要是调用卡尔曼滤波来对物体的状态进行预测，并且更新 time_since_update 变量
+            track.predict()
 
     """
-    :param dets: 输入的 dets 是检测结果，形式为 [x1, y1, x2, y2, score]
+    :param dets: 输入的 dets 是检测结果，形式为 [x1, y1, w, h, score]
     """
     def update(self, frame, frame_count, detections):
         """
@@ -92,6 +90,7 @@ class Sort(object):
         # 存放最后返回的结果
         ret = []
 
+        # 将 dets 中的检测框转化为 [x1, y1, x2, y2]
         for det in detections:
             dets.append(det.to_tlbr())
         dets = np.asarray(dets)
@@ -116,38 +115,34 @@ class Sort(object):
         if dets.any():
             # 对传入的检测结果 dets 与上一帧跟踪物体在当前帧中预测的结果 trks 做关联，
             # 返回匹配的目标矩阵 matched, 新增目标的矩阵 unmatched_dets, 离开画面的目标矩阵 unmatched_trks
-            matched_a, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets, trks)
-            matched_b, unmatched_dets, unmatched_trks = kcf_associate(frame, unmatched_dets, unmatched_trks, detections, self.tracks)
+            matched_a, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets, trks, detections, self.tracks)
+            matched_b, unmatched_dets, unmatched_trks, roi_matrix = kcf_associate(frame, matched_a, unmatched_dets, unmatched_trks, detections, self.tracks)
             matched = np.concatenate((matched_a, matched_b), axis=0)
 
             # update matched trackers with assigned detections
             # 对卡尔曼跟踪器做遍历
-            for detection_idx, track_idx in matched:
-                # 如果上一帧中的 tracker 还在当前帧画面中（即不在当前预测的离开画面的矩阵 unmatched_trks 中）
-                # 说明 tracker 在当前帧中找到了和其相匹配的 detection，接着在 matched 矩阵中找到与其关联的
+            for det, trk in matched:
+                # 如果上一帧中的 tracker 还在当前帧画面中，说明 tracker 在当前帧中找到了和其相匹配的 detection，接着在 matched 矩阵中找到与其关联的
                 # 检测器的 bbox 结果，并用其来更新 tracker 中的卡尔曼滤波器
-                trk = self.tracks[track_idx]
-                detection = detections[detection_idx]
-                trk.update(frame, frame_count, self.kf, detection.to_tlwh(), detection.to_tlbr(), detections[detection_idx].to_xyah())
+                det_idx, trk_idx = np.where(detections == det)[0][0], np.where(self.tracks == trk)[0][0]
+                roi = roi_matrix[det_idx][trk_idx]
 
-            for track_idx in unmatched_trks:
-                self.tracks[track_idx].mark_missed()
+                trk.update(frame, frame_count, det, roi)
+
+            for trk in unmatched_trks:
+                trk_idx = np.where(self.tracks == trk)[0][0]
+                self.tracks[trk_idx].mark_missed()
 
             # create and initialise new trackers for unmatched detections
             # 对于新增的未匹配的检测结果，创建并初始化跟踪器
-            for detection_idx in unmatched_dets:
-                det = detections[detection_idx]
-                mean, covariance = self.kf.initiate(det.to_xyah())
+            for det in unmatched_dets:
                 # 将新增的未匹配的检测结果 dets[i, :] 传入到 Tracker，从而重新创建一个 tracker
-                trk = Track(frame_count, det.to_tlbr(), mean, covariance, self.generate_id(), self.n_init, self.max_age, self.cn,
-                                    self.hog, self.fixed_window, self.multi_scale, self.peak_threshold)
-                # 初始化 tracker 中的 kcf 跟踪器
-                trk.init_kcf(frame, det.tlwh)
+                trk = Track(frame, frame_count, det, self.generate_id(), self.n_init, self.max_age, self.cn, self.hog, self.peak_threshold)
                 # 将刚刚创建和初始化的跟踪器 trk 传入到 trackers 中
-                self.tracks.append(trk)
+                self.tracks = np.append(self.tracks, trk)
 
         self.save_path()
-        self.tracks = [t for t in self.tracks if not t.is_deleted()]
+        self.tracks = np.array([t for t in self.tracks if not t.is_deleted()])
 
         i = len(self.tracks)
         # tracker_copy 用来保存 tracker，在图片上画出轨迹
@@ -160,7 +155,7 @@ class Sort(object):
             # 同时满足以下两个条件的 tracker 才能够返回:
             # 1.tracker 没有匹配上 detection 的次数少于 max_age 次
             # 2.tracker 最近 10 帧连续下落，并且每一帧下落的距离满足要求
-            if (trk.time_since_update < self.max_age) and trk.downward():
+            if trk.time_since_update < self.max_age:
                 # tracker 到目前为止至少连续匹配上了 min_hits 次 (除非当前为止的帧数少于 min_hits)，并且 tracker 只要有一次没有匹配上，
                 # tracker 的 hit_streak 就会被重置为 0
                 if (trk.hits >= self.min_hits or self.frame_count <= self.min_hits) and trk.time_since_update == 0:
@@ -171,7 +166,7 @@ class Sort(object):
             # remove dead tracker
             # 如果当前 tracker 已经有 max_age 次没有目标匹配上，则说明此 track 跟踪的物体已经离开了画面，所以将其从 tracker 集合中删除
             if trk.time_since_update > self.max_age:
-                self.tracks.remove(trk)
+                self.tracks = np.delete(self.tracks, np.where(self.tracks == trk)[0][0])
 
         if len(ret) > 0:
             return np.concatenate(ret), tracker_downward

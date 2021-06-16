@@ -9,6 +9,9 @@ def subPixelPeak(left, center, right):
     divisor = 2 * center - right - left  # float
     return 0 if abs(divisor) < 1e-3 else 0.5 * (right - left) / divisor
 
+def extract_image(image, roi):
+    img = image[int(roi[1]):int(roi[1] + roi[3]), int(roi[0]):int(roi[0] + roi[2])]
+    return img
 
 '''
 kcf1 tracker 跟踪算法主要使用了三个公式：核回归训练提速、核回归检测提速、核相关矩阵的计算提速
@@ -18,7 +21,7 @@ kcf1 tracker 跟踪算法主要使用了三个公式：核回归训练提速、�
 上一帧目标框中心的偏移量，然后移动目标框，使得新的最大响应值的位置在目标框中心。然后再调用 tracker#train 方法，根据新读入的图像，更新模板以及核线性回归参数 alpha
 '''
 class KCFTracker:
-    def __init__(self, cn=False, hog=False, fixed_window=True, multiscale=False, peak_threshold=0.4):
+    def __init__(self, roi, scale, cn=False, hog=False, peak_threshold=0.4):
         # 岭回归中的 lambda 常数，正则化
         self.lambdar = 0.0001   # regularization
         # extra area surrounding the target
@@ -27,6 +30,8 @@ class KCFTracker:
         # bandwidth of gaussian target
         self.output_sigma_factor = 0.125
         self.peak_threshold = peak_threshold
+
+        self._roi = roi
 
         # 是否使用 fhog 特征
         self._hog_feature = hog
@@ -50,45 +55,37 @@ class KCFTracker:
             self.sigma = 0.2
             self.cell_size = 1
 
-        if multiscale:
-            # 模板大小，在计算 _tmpl_sz 时，较大边长被归一成 96，而较小的边按比例缩小
-            self.template_size = 96   # template size
-            # 多尺度估计🥌时的尺度步长
-            # scale step for multi-scale estimation
-            self.scale_step = 1.05
-            # to downweight detection scores of other scales for added stability
-            # 对于其它尺度的响应值，都会乘以 0.96，也就是乘以一个惩罚系数
-            self.scale_weight = 0.96
-        elif fixed_window:
-            self.template_size = 96
-            self.scale_step = 1
-        else:
-            self.template_size = 1
-            self.scale_step = 1
+        # 模板大小，在计算 _tmpl_sz 时，较大边长被归一成 96，而较小的边按比例缩小
+        self.template_size = 96   # template size
+        # 多尺度估计🥌时的尺度步长
+        # scale step for multi-scale estimation
+        self.scale_step = 1.05
+        # to downweight detection scores of other scales for added stability
+        # 对于其它尺度的响应值，都会乘以 0.96，也就是乘以一个惩罚系数
+        self.scale_weight = 0.96
+
+        self.scale_estimator = scale
 
         self._tmpl_sz = [0, 0]  # cv::Size, [width,height]  #[int,int]
-        self._roi = [0., 0., 0., 0.]  # cv::Rect2f, [x,y,width,height]  #[float,float,float,float]
         self.size_patch = [0, 0, 0]  # [int,int,int]
-        self._scale = 1.   # float
+        self.scale = 1.   # float
         self._alphaf = None  # numpy.ndarray    (size_patch[0], size_patch[1], 2)
         self._prob = None  # numpy.ndarray    (size_patch[0], size_patch[1], 2)
-        self._tmpl = None  # numpy.ndarray    raw: (size_patch[0], size_patch[1])   hog: (size_patch[2], size_patch[0]*size_patch[1])
+        self.tmpl = None  # numpy.ndarray    raw: (size_patch[0], size_patch[1])   hog: (size_patch[2], size_patch[0]*size_patch[1])
         self.hann = None  # numpy.ndarray    raw: (size_patch[0], size_patch[1])   hog: (size_patch[2], size_patch[0]*size_patch[1])
 
     # 使用第一帧和它的跟踪框，初始化 KCF 跟踪器
-    def init(self, roi, image):
-        self._roi = list(map(float, roi))
-        assert (roi[2] > 0 and roi[3] > 0)
+    def init(self, image):
         # _tmpl 是从目标图像中所获取到的 fhog 特征矩阵，shape 为 [sizeX, sizeY, 特征维数]
         # 当特征为 cn 特征的话，那么就为 11 维
         # 当特征为 fhog 特征的话，那么就为 31 维
         # 当特征为 cn + fhog 的话，就为 11 + 31 = 42 维
-        self._tmpl = self.getFeatures(image, 1)
+        self.tmpl = self.getFeatures(image, 1.0, 1.0, self._roi)
         # _prob 是初始化时的高斯响应图，也就是在目标框的中心位置响应值最大
         self._prob = self.createGaussianPeak(self.size_patch[0], self.size_patch[1])
         # alpha 是线性回归系数，有两个通道分成实部和虚部
         self._alphaf = np.zeros((self.size_patch[0], self.size_patch[1], 2), np.float32)
-        self.train(self._tmpl, 1.0)
+        self.train(self.tmpl, 1.0)
 
     # 初始化 hanning 窗口，函数只在第一帧被执行
     # 目的是采样时为不同的样本分配不同的权重，0.5 * 0.5 是用汉宁窗归一化为 [0, 1]，得到的矩阵值就是每个样本的权重
@@ -171,32 +168,34 @@ class KCFTracker:
 
         return d
 
-    def getFeatures(self, image, inithann, scale_adjust=1.0):
+    def getFeatures(self, image, inithann, scale_adjust, roi):
+        if roi is None:
+            roi = self._roi
         # self._roi 表示初始的目标框 [x, y, width, height]
         extracted_roi = [0, 0, 0, 0]
         # cx, cy 表示目标框中心点的 x 坐标和 y 坐标
-        cx = self._roi[0] + self._roi[2] / 2  # float
-        cy = self._roi[1] + self._roi[3] / 2  # float
+        cx = roi[0] + roi[2] / 2.0  # float
+        cy = roi[1] + roi[3] / 2.0  # float
 
         if inithann:
             # 保持初始目标框中心不变，将目标框的宽和高同时扩大相同倍数
             # 将目标框扩大 padding 倍是因为需要对目标框中的目标进行循环移位（x, y 两个方向）
-            padded_w = self._roi[2] * self.padding
-            padded_h = self._roi[3] * self.padding
+            padded_w = roi[2] * self.padding
+            padded_h = roi[3] * self.padding
 
             if self.template_size > 1:
                 # 设定模板图像尺寸为 96，计算扩展框与模板图像尺寸的比例
                 # 把最大的边缩小到 96，_scale 是缩小比例，_tmpl_sz 是滤波模板裁剪下来的 PATCH 大小
                 # scale = max(w,h) / template
-                self._scale = max(padded_h, padded_w) / float(self.template_size)
+                self.scale = max(padded_h, padded_w) / float(self.template_size)
                 # 同时将 scale 应用于宽和高，获取图像提取区域
                 # roi_w_h = (w / scale, h / scale)
-                self._tmpl_sz[0] = int(padded_w / self._scale)
-                self._tmpl_sz[1] = int(padded_h / self._scale)
+                self._tmpl_sz[0] = int(padded_w / self.scale)
+                self._tmpl_sz[1] = int(padded_h / self.scale)
             else:
                 self._tmpl_sz[0] = int(padded_w)
                 self._tmpl_sz[1] = int(padded_h)
-                self._scale = 1.
+                self.scale = 1.
 
             if self._hog_feature or self._cn_feature:
                 # 由于后面提取 hog 特征时会以 cell 单元的形式提取，另外由于需要将频域直流分量移动到图像中心，因此需保证图像大小为 cell大小的偶数倍，
@@ -208,8 +207,8 @@ class KCFTracker:
                 self._tmpl_sz[1] = int(self._tmpl_sz[1]) // 2 * 2
 
         # 选取从原图中扣下的图片位置大小
-        extracted_roi[2] = int(scale_adjust * self._scale * self._tmpl_sz[0])
-        extracted_roi[3] = int(scale_adjust * self._scale * self._tmpl_sz[1])
+        extracted_roi[2] = int(scale_adjust * self.scale * self._tmpl_sz[0] * self.scale_estimator.current_scale_factor)
+        extracted_roi[3] = int(scale_adjust * self.scale * self._tmpl_sz[1] * self.scale_estimator.current_scale_factor)
         extracted_roi[0] = int(cx - extracted_roi[2] / 2)
         extracted_roi[1] = int(cy - extracted_roi[3] / 2)
 
@@ -328,83 +327,7 @@ class KCFTracker:
         alphaf = complexDivision(self._prob, fftd(k) + self.lambdar)
 
         # 模板更新: template = (1 - 0.012) * template + 0.012 * z
-        self._tmpl = (1 - train_interp_factor) * self._tmpl + train_interp_factor * x
+        self.tmpl = (1 - train_interp_factor) * self.tmpl + train_interp_factor * x
         # 线性回归系数 self._alpha 的更新
         # alpha = (1 - 0.012) * alpha + 0.012 * alpha_x_z
         self._alphaf = (1 - train_interp_factor) * self._alphaf + train_interp_factor * alphaf
-
-    # 获取当前帧的目标位置以及尺度，image 为当前帧的整幅图像
-    # 基于当前帧更新目标位置
-    def update(self, image):
-        # roi 为 [x, y, width, height]
-        roi = self._roi
-        # 修正边界
-        if roi[0] + roi[2] <= 0:
-            roi[0] = -roi[2] + 1
-        if roi[1] + roi[3] <= 0:
-            roi[1] = -roi[2] + 1
-        if roi[0] >= image.shape[1] - 1:
-            roi[0] = image.shape[1] - 2
-        if roi[1] >= image.shape[0] - 1:
-            roi[1] = image.shape[0] - 2
-
-        # 跟踪框、尺度框的中心
-        cx = roi[0] + roi[2] / 2.
-        cy = roi[1] + roi[3] / 2.
-        # loc: 表示新的最大响应值偏离 roi 中心的位移
-        # peak_value: 尺度不变时检测峰值结果
-        loc, peak_value = self.detect(self._tmpl, self.getFeatures(image, 0, 1.0))
-
-        # 略大尺度和略小尺度进行检测
-        # 对于不同的尺度，都有着尺度惩罚系数 scale_weight，计算的公式如下：
-        # _scale = _scale * (1 / scale_step)
-        # T_w_h = T_w_h * (1 / scale_step)
-        # T_x_y = T_cx_cy - T_w_h / 2 + res_x_y * cell_size * _scale
-
-        if self.scale_step != 1:
-            # Test at a smaller_scale
-            new_loc1, new_peak_value1 = self.detect(self._tmpl, self.getFeatures(image, 0, 1.0 / self.scale_step))
-            # Test at a bigger_scale
-            new_loc2, new_peak_value2 = self.detect(self._tmpl, self.getFeatures(image, 0, self.scale_step))
-
-            # 在计算其他尺度的响应时，会乘以一个惩罚系数，并且会把 T_w_h 乘以 scale_step
-            # 或者除以 scale_step 进行尺度缩小和扩大。self._scale 表示的是扩展框（padding 之后的图像）与模板图像尺寸的比例
-            if self.scale_weight * new_peak_value1 > peak_value and new_peak_value1 > new_peak_value2:
-                loc = new_loc1
-                peak_value = new_peak_value1
-                self._scale /= self.scale_step
-                roi[2] /= self.scale_step
-                roi[3] /= self.scale_step
-            elif self.scale_weight * new_peak_value2 > peak_value:
-                loc = new_loc2
-                peak_value = new_peak_value2
-                self._scale *= self.scale_step
-                roi[2] *= self.scale_step
-                roi[3] *= self.scale_step
-
-        # 重新计算 roi[0] 和 roi[1] 使得新的最大响应值位于目标框的中心
-        roi[0] = cx - roi[2] / 2.0 + loc[0] * self.cell_size * self._scale
-        roi[1] = cy - roi[3] / 2.0 + loc[1] * self.cell_size * self._scale
-
-        if roi[0] >= image.shape[1] - 1:
-            roi[0] = image.shape[1] - 1
-        if roi[1] >= image.shape[0] - 1:
-            roi[1] = image.shape[0] - 1
-        if roi[0] + roi[2] <= 0:
-            roi[0] = -roi[2] + 2
-        if roi[1] + roi[3] <= 0:
-            roi[1] = -roi[3] + 2
-
-        assert (roi[2] > 0 and roi[3] > 0)
-
-        return roi, peak_value
-
-    def retrain(self, image, roi):
-        self._roi = roi
-        # 使用当前的检测框来训练样本参数
-        x = self.getFeatures(image, 0, 1.0)
-        self.train(x, self.interp_factor)
-
-def extract_image(image, roi):
-    img = image[int(roi[1]):int(roi[1] + roi[3]), int(roi[0]):int(roi[0] + roi[2])]
-    return img
