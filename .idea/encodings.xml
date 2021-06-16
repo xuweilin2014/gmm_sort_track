@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Encoding">
+    <file url="file://$PROJECT_DIR$/output/cn/cn_test.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/fhog/hog_test.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/fhog_cn/hog_cn_test.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/mot_metrics/cn/cn.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/mot_metrics/fhog_cn/fhog_cn.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/mot_metrics/raw_pixel/raw_pixel.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/raw_pixel/raw_pixel_test.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/vot_metrics/cn/cn.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/vot_metrics/fhog/fhog.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/vot_metrics/fhog_cn/fhog_cn.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/output/vot_metrics/raw_pixel/raw_pixel.txt" charset="GBK" />
+  </component>
+</project>
