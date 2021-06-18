@@ -101,7 +101,7 @@ class Sort(object):
             pos = self.tracks[t].to_tlbr()
             trk[:] = [pos[0], pos[1], pos[2], pos[3], 0]
             # 如果预测的 bbox 为空，那么将第 t 个 track 删除掉
-            if np.any(np.isnan(pos)) :
+            if np.any(np.isnan(pos)):
                 to_del.append(t)
 
         # 将预测为空的卡尔曼跟踪器所在行删除，最后 trks 中存放的是上一帧中被跟踪的所有物体在当前帧中预测的非空 bbox

@@ -77,7 +77,7 @@ class ScaleEstimator:
         # dsst 算法中对一个目标，会分成 33 个尺度来进行计算
         self.n_scales = 33
         # 多尺度估计时候的尺度步长，也就是论文中的 a 的值
-        self.scale_step = 1.45
+        self.scale_step = 1.8
         # 当前帧的尺度因子，注意当前尺度因子是累积的
         # 比如，第一帧时，物体的尺度变为初始的 1.5 倍，那么 factor = 1.5，在第二帧时，物体的尺度又变为原来第一帧的 1.2，factor = 1.5 * 1.2 = 1.8
         self.current_scale_factor = 1
@@ -91,6 +91,10 @@ class ScaleEstimator:
         self.scale_max_area = 512
         self.scale_padding = 1.0
         self.scale_sigma_factor = 0.25
+        # 之前，生成的 scale_factors 为 scale_step ** [16, 15, ..., 1, 0, -1, -2, ..., -15, -16]
+        # 现在，变成了 scale_step ** [16 + sd, 15 + sd, ..., 1 + sd, 0 + sd, -1 + sd, -2 + sd, ..., -15 + sd, -16 + sd]
+        # 也就是倾向于得到的物体尺度更大
+        self.scale_deviate = 0.5
 
         if hog:
             self.cell_size = 4
@@ -115,7 +119,7 @@ class ScaleEstimator:
         # scale_step 表示的是多尺度估计时的尺度步长，默认为 1.05
         # 生成的 scale_factors 就是尺度因子集合，将这些尺度因子和 width 以及 height 相乘，从而对原图像进行放大和缩小
         # 1.05 ** [16, 15, ..., 1, 0, -1, -2, ..., -15, -16]
-        self.scale_factors = np.power(self.scale_step, center - scale_factors - 1)
+        self.scale_factors = np.power(self.scale_step, center - scale_factors - 1 + self.scale_deviate)
 
         # get the scaling rate for compressing to the model size
         # 将图片的长和宽进行扩大和缩小

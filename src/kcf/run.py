@@ -40,7 +40,7 @@ class Detector(object):
             # if 760 <= frame_count < 965 or frame_count == 0:
             #     continue
 
-            if 0 <= frame_count <= 520:
+            if 0 <= frame_count <= 1120:
                 continue
 
             cnts, _ = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

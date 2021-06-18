@@ -31,7 +31,7 @@ def comp_distance(det_box, kcf_box):
 def kcf_associate(frame, match_d_t, unmatched_dets, unmatched_trks, dets, trks):
     unmatched_dets_final = []
     unmatched_trks_final = []
-    peak_threshold = 0.3
+    peak_threshold = 0.4
     matched = []
 
     res_matrix = np.zeros((len(unmatched_dets), len(unmatched_trks)), dtype=np.float)
@@ -101,7 +101,7 @@ def kcf_associate(frame, match_d_t, unmatched_dets, unmatched_trks, dets, trks):
             flag = False
         else:
             dist = comp_distance(det.to_tlbr(), trk.to_tlbr())
-            if dist > np.min(trk.to_tlwh()[2:]) * 1.5:
+            if dist > np.min(trk.to_tlwh()[2:]) * 2:
                 flag = False
             else:
                 matched.append(np.r_[det, trk].reshape((1,2)))
@@ -118,7 +118,7 @@ def kcf_associate(frame, match_d_t, unmatched_dets, unmatched_trks, dets, trks):
     return matched, unmatched_dets_final, unmatched_trks_final, roi_matrix
 
 
-def associate_detections_to_trackers(detections, trackers, det_objs, trk_objs, iou_threshold=0.1):
+def associate_detections_to_trackers(detections, trackers, det_objs, trk_objs, iou_threshold=0.01):
     """
     Assigns detections to tracked object (both represented as bounding boxes)
     Returns 3 lists of matches, unmatched_detections and unmatched_trackers

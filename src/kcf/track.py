@@ -79,6 +79,8 @@ class Track(object):
         self.scale_kf = ScaleKalmanFilter()
         self.scale_kf.initiate(det.to_xyah())
 
+        self.expand_num = 1.05
+
         self.t = 1
         self.x_avg = np.zeros(2)
         # 在计算 mot 指标的时候使用
@@ -92,14 +94,16 @@ class Track(object):
         cf_scale = np.array([self.scale.base_width, self.scale.base_height]) * factor
         det_scale = np.array(roi[2:])
 
+        # 对【一维尺度滤波器】和【检测器】得到的大小，进行融合得到一个更加准确地物体尺度
         sc = self.weighted_fusion(2, cf_scale, det_scale)
+        sc = sc[:] * self.expand_num
         self.scale.current_scale_factor = max(sc[0] / self.scale.base_width, sc[1] / self.scale.base_height)
         if self.scale.current_scale_factor < self.scale.min_scale_factor:
             self.scale.current_scale_factor = self.scale.min_scale_factor
 
         self.scale.train_scale(frame)
-        x, y, width, height = self.scale.get_roi()
-        measurements = np.r_[x, y, width / height, height]
+        _, _, width, height = self.scale.get_roi()
+        measurements = np.r_[roi[:2], width / height, height]
 
         # 更新卡尔曼滤波的状态方程
         self.tran_kf.update(measurements)
