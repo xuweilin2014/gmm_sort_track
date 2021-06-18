@@ -33,7 +33,7 @@ class TranslationKalmanFilter(KalmanFilter):
             self._motion_mat[i, ndim + i] = self.dt
 
         # 这个卡尔曼滤波器用来对物体的尺度大小进行预测
-        self._control_mat = np.transpose(np.array([0.5, 0.5, 0.005, 1, 2.8, 0.000]))
+        self._control_mat = np.transpose(np.array([0.5, 0.5, 0.005, 1.2, 4.0, 0.001]))
         self.u = 1
 
         '''
@@ -48,7 +48,7 @@ class TranslationKalmanFilter(KalmanFilter):
         # Motion and observation uncertainty are chosen relative to the current
         # state estimate. These weights control the amount of uncertainty in
         # the model. This is a bit hacky.
-        self._std_weight_position = 1. / 20
+        self._std_weight_position = 1. / 60
         self._std_weight_velocity = 1. / 160
 
     # 对于未匹配到的目标新建一个 track，一般这样的检测目标都是新出现的物体
